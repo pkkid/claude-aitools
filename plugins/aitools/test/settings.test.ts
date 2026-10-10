@@ -13,8 +13,8 @@ function memoryStore(entries: Record<string, unknown> = {}): KeyStore {
 }
 
 describe('settings', () => {
-  test('seventeen toggles in order, the mascot first and offered only where SVG draws', () => {
-    expect(TOGGLES).toHaveLength(17)
+  test('eighteen toggles in order, the mascot first and offered only where SVG draws, the project row last', () => {
+    expect(TOGGLES).toHaveLength(18)
     expect(TOGGLES[0]).toEqual({ key: 'mascot', label: 'Mascot', needsSvg: true })
     expect(TOGGLES[1]).toEqual({ key: 'label', label: 'Title' })
     expect(TOGGLES.filter(t => t.needsSvg)).toHaveLength(1)
@@ -25,6 +25,7 @@ describe('settings', () => {
     expect(TOGGLES[10]).toEqual({ key: 'coldCost', label: 'Cold-cache cost' })
     expect(TOGGLES[13]?.key).toBe('threadPercent')
     expect(TOGGLES[16]?.key).toBe('thresholdColors')
+    expect(TOGGLES[17]).toEqual({ key: 'projectRow', label: 'Project row' })
   })
 
   test('all default to on', () => {

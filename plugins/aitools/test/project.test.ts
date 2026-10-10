@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   commandDot,
+  displayName,
   expand,
   isServerUp,
   issueInBranch,
@@ -28,6 +29,14 @@ describe('parseGithubRemote', () => {
     expect(parseGithubRemote('https://gitlab.com/pkkid/vowelit.git')).toBeNull()
     expect(parseGithubRemote('git@bitbucket.org:pkkid/vowelit.git')).toBeNull()
     expect(parseGithubRemote('/srv/git/vowelit.git')).toBeNull()
+  })
+})
+
+describe('displayName', () => {
+  test("the repository's name with its first letter capitalized", () => {
+    expect(displayName('claude-mods')).toBe('Claude-mods')
+    expect(displayName('vowelit')).toBe('Vowelit')
+    expect(displayName('API')).toBe('API')
   })
 })
 
@@ -128,6 +137,9 @@ describe('tool status', () => {
     expect(serverStatus({ phase: 'ready', branch: 'feat/x', detail: 'http://x' }, null)).toEqual({ dot: '●', text: 'Running feat/x', color: 'green' })
     expect(serverStatus(undefined, { checkout: '/w', label: 'main', pid: 1 })).toEqual({ dot: '●', text: 'Running main', color: 'green' })
     expect(serverStatus({ phase: 'exited', branch: '', detail: 'code 1' }, null)).toEqual({ dot: '○', text: 'Exited (code 1)', color: 'red' })
+    expect(serverStatus({ phase: 'exited', branch: '', detail: 'code 0' }, null)).toEqual({ dot: '○', text: 'Exited (code 0)' })
+    expect(serverStatus({ phase: 'exited', branch: '', detail: 'SIGTERM' }, null)).toEqual({ dot: '○', text: 'Exited (SIGTERM)' })
+    expect(serverStatus({ phase: 'exited', branch: '', detail: 'SIGKILL' }, null).color).toBe('red')
     expect(isServerUp(undefined, { checkout: '', label: 'x', pid: null })).toBe(true)
     expect(isServerUp({ phase: 'exited', branch: '', detail: '' }, null)).toBe(false)
   })

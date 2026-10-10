@@ -154,7 +154,11 @@ export function serverStatus(run: ToolRun | undefined, listener: ToolListener | 
   if (phase === 'ready') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: 'green' }
   if (listener) return { dot: '●', text: `Running ${listener.label}`, color: 'green' }
   if (phase === 'running') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: 'green' }
-  if (phase === 'exited') return { dot: '○', text: `Exited${run?.detail ? ` (${run.detail})` : ''}`, color: 'red' }
+  if (phase === 'exited') {
+    // Exiting with code 0, or on the stop signal a Stop sends, is a clean end: dim like Stopped, not red.
+    const isClean = /^(code 0|SIGTERM|SIGINT)$/.test(run?.detail ?? '')
+    return { dot: '○', text: `Exited${run?.detail ? ` (${run.detail})` : ''}`, ...(isClean ? {} : { color: 'red' }) }
+  }
   if (phase === 'failed') return { dot: '○', text: `Failed${run?.detail ? `: ${run.detail}` : ''}`, color: 'red' }
 
   return { dot: '○', text: 'Stopped' }
@@ -218,7 +222,7 @@ export function renderProjectRow(
   return (
     <Box flexDirection="row" justifyContent="space-between" width="100%">
       <Box key="project-left" flexDirection="row" gap={gap} flexShrink={1} alignItems="center">
-        <Button key="project-name" label={view.name} plain dimColor={false} onPress={() => on.open(repo.url)} />
+        <Button key="project-name" label={view.name} {...QUIET} onPress={() => on.open(repo.url)} />
         {view.boardUrl !== null && <Button key="project-board" label="Project" {...QUIET} onPress={() => on.open(view.boardUrl ?? repo.url)} />}
         {view.issue !== null && (
           <Button
@@ -272,6 +276,11 @@ export function renderProjectRow(
       </Box>
     </Box>
   )
+}
+
+/** The row's name for a repository: its name with the first letter capitalized (`claude-mods` → `Claude-mods`). */
+export function displayName(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
 /** A tool's log pane id. */

@@ -1,7 +1,8 @@
 /**
  * aitools.json: the mod's settings as files the person can read and edit.
  *
- * `~/.claude/aitools.json` (under CLAUDE_CONFIG_DIR when set) holds the person's own settings: what the bar shows,
+ * `~/.claude/aitools.json` (under CLAUDE_CONFIG_DIR when set) holds the person's own settings: what the bar shows
+ * (the project row among it),
  * the view, the Subagents pane's picks. Everything the mod's own controls change is written here, never to a
  * project's file. `<repo>/.claude/aitools.json` holds only the `project` section (src/project.tsx reads it).
  *
@@ -24,8 +25,6 @@ export type Personal = {
   settings: Settings
   /** `/aitools off`: the whole bar hidden. */
   isHidden: boolean
-  /** `/aitools project off`: the project row hidden in every project. */
-  isProjectShown: boolean
   view: ViewMode
   team: TeamPick
   helpers: HelperMode
@@ -36,7 +35,6 @@ export type Personal = {
 export const PERSONAL_DEFAULTS: Personal = {
   settings: DEFAULT_SETTINGS,
   isHidden: false,
-  isProjectShown: true,
   view: 'off',
   team: 'default',
   helpers: 'same',
@@ -79,7 +77,6 @@ export function personalFrom(raw: Json): Personal {
   return {
     settings: normalizeSettings(objectAt(bar, 'show')),
     isHidden: bar.hidden === true,
-    isProjectShown: bar.project !== false,
     view: view === 'task' || view === 'clean' ? view : 'off',
     team: isTeamPick(subagents.team) ? subagents.team : PERSONAL_DEFAULTS.team,
     helpers: subagents.helpers === 'fast' ? 'fast' : 'same',
@@ -92,7 +89,6 @@ export function personalFrom(raw: Json): Personal {
 const PATHS: { [K in keyof Personal]: readonly [string, ...string[]] } = {
   settings: ['bar', 'show'],
   isHidden: ['bar', 'hidden'],
-  isProjectShown: ['bar', 'project'],
   view: ['view'],
   team: ['subagents', 'team'],
   helpers: ['subagents', 'helpers'],

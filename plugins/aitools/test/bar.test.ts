@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { percentText, segments, toneFor, usdPerWeeklyPercent } from '../src/bar'
+import { packRows, percentText, segments, toneFor, usdPerWeeklyPercent } from '../src/bar'
 import type { View } from '../src/bar'
 import { DEFAULT_SETTINGS } from '../src/settings'
 import type { Settings } from '../types'
@@ -202,5 +202,19 @@ describe('token segment', () => {
 
   test('both off, no token segment', () => {
     expect(texts(view({}, { threadTokens: false, lastTurnTokens: false })).some(t => t.startsWith('tok'))).toBe(false)
+  })
+})
+
+describe('packRows', () => {
+  const width = (s: string) => s.length
+
+  test('each row filled until the next item would pass the limit, the gaps counted', () => {
+    expect(packRows(['aaaa', 'bbbb', 'cccc', 'dd'], width, 10, 2)).toEqual([['aaaa', 'bbbb'], ['cccc', 'dd']])
+    expect(packRows(['aaa', 'bbb'], width, 8, 2)).toEqual([['aaa', 'bbb']])
+  })
+
+  test('an item longer than the limit gets a row of its own; nothing gives no rows', () => {
+    expect(packRows(['a', 'bbbbbbbbbbbb', 'c'], width, 10, 2)).toEqual([['a'], ['bbbbbbbbbbbb'], ['c']])
+    expect(packRows([], width)).toEqual([])
   })
 })

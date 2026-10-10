@@ -22,6 +22,7 @@ export const TOGGLES: readonly { key: ToggleKey; label: string; needsSvg?: true 
   { key: 'monthlyCost', label: 'Monthly cost' },
   { key: 'burnRate', label: 'Burn-rate projection' },
   { key: 'thresholdColors', label: 'Threshold colors' },
+  { key: 'projectRow', label: 'Project row' },
 ]
 
 export const DEFAULT_SETTINGS: Settings = Object.fromEntries(TOGGLES.map(t => [t.key, true])) as Settings

@@ -33,10 +33,10 @@ sessions. `/handoff` works either way.
 
 ## Settings
 
-Press **⁝** to open the options above the bar, four to a row, and toggle any of: (in the desktop Code tab only,
+Press **⁝** to open the options above the bar, wrapped at about 80 characters a row, and toggle any of: (in the desktop Code tab only,
 leading the first row) the mascot, the title, 5-hour usage,
 weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, cold-cache cost,
-thread cost, last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
+thread cost, last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors, and last, the project row. The **🛠** button always shows.
 Changes show in the bar right away and are saved across sessions, in the settings file (below). An option that is off does no work in the
 background: the transcript scan runs only for monthly cost, thread tokens or thread cost %; the cost lookups only for
 the cost options; the mascot follows nothing while hidden. (Request times are kept either way: `/keepwarm` needs them.) Turned back on, an
@@ -47,7 +47,7 @@ from. Hiding the bar with `/aitools off` stops all of it. Press **⁝** again to
 ### The settings file
 
 Everything the mod's controls change is saved to `~/.claude/aitools.json` (`$CLAUDE_CONFIG_DIR/aitools.json` when
-that is set): the display options, `/aitools on|off`, `/aitools project on|off`, the view, and the Subagents pane's
+that is set): the display options (the project row among them), `/aitools on|off`, the view, and the Subagents pane's
 picks. The first run writes every setting into it, taking over what earlier versions kept in the mod's own store, so
 the file lists everything there is to change. Edit it by hand and the bar follows within 30 seconds, when **⁝** opens,
 or at once when Claude edits it. A file that isn't valid JSON is left alone: the settings stay as they were, and one
@@ -57,8 +57,7 @@ dim line in the chat says what's wrong.
 {
   "bar": {
     "hidden": false,
-    "project": true,
-    "show": { "mascot": true, "label": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
+    "show": { "mascot": true, "label": true, "projectRow": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
   },
   "view": "off",
   "subagents": { "team": "default", "helpers": "same", "showing": "all", "hideAfter": "never" }
@@ -326,12 +325,13 @@ rest works. Closed, it reads nothing.
 In a GitHub repository a second row sits under the bar, for the project the session works in:
 
 ```
-vowelit  Project  #42 Login fails on Safari                          ● Running feat/42-login  Stop Server  Docs
+Vowelit  Project  #42 Login fails on Safari                          ● Running feat/42-login  Stop Server  Docs
 ```
 
 On the left, each opening in your browser:
 
-- **The repository's name**, from the main checkout's GitHub remote (`origin` first), opening the repository.
+- **The repository's name**, its first letter capitalized, from the main checkout's GitHub remote (`origin` first),
+  opening the repository. `name` in the project file shows a name of your own instead, as written.
 - **Project**: the repository's GitHub Project board, when exactly one is linked to it. It's looked up once a day
   through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
   in the project file.
@@ -340,8 +340,8 @@ On the left, each opening in your browser:
   `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
   from GitHub, one call per issue, kept.
 
-Outside a GitHub repository there is no row. `/aitools project off` hides it in every project (saved to the settings
-file), and `/aitools project` shows it again.
+Outside a GitHub repository there is no row. **Project row** in the **⁝** options hides it in every project (saved
+to the settings file); `/aitools project on|off` does the same from the prompt.
 
 ### The project file
 
