@@ -164,6 +164,45 @@ export type PingReceipt = { at: number; read: number; usd: number | null; isEsti
 /** /keepwarm's window: when it ends, and the last ping's receipt. */
 export type KeepWarm = { until: number; lastPing: PingReceipt | null }
 
+/** The GitHub repository the session works in: from the main checkout's `origin` remote. */
+export type GithubRepo = {
+  owner: string
+  name: string
+  /** `https://github.com/<owner>/<name>`. */
+  url: string
+  /** The session's checkout (a worktree's own folder) and the main checkout. */
+  checkout: string
+  main: string
+  /** The checkout's branch; '' when detached. */
+  branch: string
+}
+
+/** A tool on the project row's right, as a project's `.claude/aitools.json` defines it. */
+export type ProjectTool =
+  | { type: 'link'; id: string; label: string; url: string }
+  | { type: 'command'; id: string; label: string; run: string[]; cwd?: string }
+  | { type: 'server'; id: string; label: string; start: string[]; stop?: string[]; port?: number; ready?: string; cwd?: string }
+
+/** The project section of a project's `.claude/aitools.json`, with what was wrong in it. */
+export type ProjectConfig = {
+  isEnabled: boolean
+  name?: string
+  /** The GitHub Project board's URL, or false to show none; absent, the repository's one linked board is looked up. */
+  board?: string | false
+  tools: ProjectTool[]
+  problems: string[]
+}
+
+/** How a tool's run in this session stands; `detail` is its URL once ready, or why it ended. */
+export type ToolRun = {
+  phase: 'starting' | 'ready' | 'running' | 'stopping' | 'passed' | 'failed' | 'exited'
+  branch: string
+  detail: string
+}
+
+/** Whatever listens on a server tool's port, whoever started it: its checkout, a label (its branch) and its pid. */
+export type ToolListener = { checkout: string; label: string; pid: number | null }
+
 /** What a press in the Worktrees pane is about: Clean worktrees, or one row's delete. */
 export type WorktreeTarget = { kind: 'clean' } | { kind: 'delete'; path: string }
 
@@ -230,6 +269,24 @@ declare module 'claude-code' {
       isAskable: boolean
       /** The main chat's model, as its last request sent it: what a cold cache's cost is priced at. */
       mainModel: string | null
+      /** `/aitools project off`: the project row hidden in every project (the global aitools.json's bar.project). */
+      isProjectShown: boolean
+      /** The GitHub repository the session works in; null outside one. */
+      githubRepo: GithubRepo | null
+      /** The project's `.claude/aitools.json` project section; null when it has none. */
+      projectConfig: ProjectConfig | null
+      /** The repository's GitHub Project board, as configured or looked up; null when it has none (or several). */
+      boardUrl: string | null
+      /** The issue the session's first prompt names; null when it names none (the branch may still name one). */
+      promptIssue: number | null
+      /** The title of the issue the row links to, once fetched. */
+      issueTitle: { number: number; title: string } | null
+      /** Each tool's run in this session, by tool id. */
+      toolRuns: Record<string, ToolRun>
+      /** What listens on each server tool's port, by tool id. */
+      toolListeners: Record<string, ToolListener | null>
+      /** Each tool's log, by tool id: the newest LOG_KEEP lines. */
+      toolLogs: Record<string, string[]>
       /** /keepwarm's window while it runs; null while it is off. */
       keepWarm: KeepWarm | null
       /** Why /keepwarm last stopped before its time (a failed or cold ping); null when it ended on time or was turned off. */
