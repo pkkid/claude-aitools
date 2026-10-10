@@ -208,8 +208,32 @@ const VIEWS = [
   { mode: 'clean', label: VIEW_NAMES.clean },
 ] as const
 
-/** How many display options the ⁝ menu puts on one row: sixteen shared options make four even rows. */
-const SETTINGS_PER_ROW = 4
+/** About how many characters of labels the ⁝ menu puts on one row, the space between them counted. */
+export const SETTINGS_ROW_CHARS = 80
+/** The space between two options on a row. */
+const SETTINGS_GAP = 2
+
+/**
+ * Options packed into rows in order, each row filled until the next label would take it past `max` characters (the
+ * gap between labels counted); a label longer than `max` gets a row of its own.
+ */
+export function packRows<T>(items: readonly T[], width: (item: T) => number, max = SETTINGS_ROW_CHARS, gap = SETTINGS_GAP): T[][] {
+  const rows: T[][] = []
+  let used = 0
+  for (const item of items) {
+    const w = width(item)
+    const row = rows.at(-1)
+    if (row !== undefined && used + gap + w <= max) {
+      row.push(item)
+      used += gap + w
+    } else {
+      rows.push([item])
+      used = w
+    }
+  }
+
+  return rows
+}
 
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
 const QUIET = { plain: true, dimColor: true } as const
@@ -308,19 +332,16 @@ export function renderBar(
 
   let menu = null
   if (flags.isSettingsOpen) {
-    // At most SETTINGS_PER_ROW options to a row; a narrow band still wraps a row further.
-    // The desktop's own options (Mascot) lead the first row, on top of its usual count.
-    const shared = TOGGLES.filter(t => !t.needsSvg)
-    const rows = Array.from({ length: Math.ceil(shared.length / SETTINGS_PER_ROW) }, (_, i) =>
-      shared.slice(i * SETTINGS_PER_ROW, (i + 1) * SETTINGS_PER_ROW),
-    )
+    // Rows of about SETTINGS_ROW_CHARS characters, in order; a narrow band still wraps a row further. The desktop's
+    // own options (Mascot) lead the first row, on top of what it holds, so both surfaces wrap at the same options.
+    const rows = packRows(TOGGLES.filter(t => !t.needsSvg), t => Array.from(`● ${t.label}`).length)
     if (Svg) {
       rows[0] = [...TOGGLES.filter(t => t.needsSvg), ...(rows[0] ?? [])]
     }
     menu = (
       <Box flexDirection="column">
         {rows.map((row, i) => (
-          <Box key={`settings-row-${i}`} flexDirection="row" flexWrap="wrap" justifyContent="flex-end" columnGap={2}>
+          <Box key={`settings-row-${i}`} flexDirection="row" flexWrap="wrap" justifyContent="flex-end" columnGap={SETTINGS_GAP}>
             {row.map(t => (
               <Button key={t.key} label={`${view.settings[t.key] ? '●' : '○'} ${t.label}`} {...QUIET} onPress={() => on.toggle(t.key)} />
             ))}
@@ -351,8 +372,9 @@ export function renderBar(
       </Box>
     )
   }
+  // On the desktop the rows get a gap between them; the terminal keeps them on consecutive lines.
   const bars = projectRow === null ? bar : (
-    <Box flexDirection="column">
+    <Box flexDirection="column" gap={Svg ? 1 : 0}>
       {bar}
       {projectRow}
     </Box>

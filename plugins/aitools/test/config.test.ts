@@ -23,13 +23,12 @@ describe('personalFrom', () => {
 
   test('each setting from its place, and a wrong value at its default', () => {
     const p = personalFrom({
-      bar: { hidden: true, project: false, show: { label: false, mascot: 'yes' } },
+      bar: { hidden: true, show: { label: false, projectRow: false, mascot: 'yes' } },
       view: 'clean',
       subagents: { team: 8, helpers: 'fast', showing: 'tool', hideAfter: 5 },
     })
     expect(p.isHidden).toBe(true)
-    expect(p.isProjectShown).toBe(false)
-    expect(p.settings).toEqual({ ...DEFAULT_SETTINGS, label: false })
+    expect(p.settings).toEqual({ ...DEFAULT_SETTINGS, label: false, projectRow: false })
     expect(p.view).toBe('clean')
     expect(p.team).toBe(8)
     expect(p.helpers).toBe('fast')
@@ -61,7 +60,7 @@ describe('migrated', () => {
 
   test('what the file holds wins; a display option it lacks joins it', () => {
     const { mascot: _, ...rest } = DEFAULT_SETTINGS
-    const raw = { bar: { show: { ...rest, label: false }, hidden: false, project: true }, view: 'clean' }
+    const raw = { bar: { show: { ...rest, label: false }, hidden: false }, view: 'clean' }
     const filled = migrated(raw, { settings: { label: true }, viewMode: 'task' })
     expect(personalFrom(filled).settings).toEqual({ ...DEFAULT_SETTINGS, label: false })
     expect(personalFrom(filled).view).toBe('clean')

@@ -1,5 +1,6 @@
 export type ToggleKey =
   | 'label'
+  | 'projectRow'
   | 'fiveHour'
   | 'weekly'
   | 'resets'
@@ -269,8 +270,6 @@ declare module 'claude-code' {
       isAskable: boolean
       /** The main chat's model, as its last request sent it: what a cold cache's cost is priced at. */
       mainModel: string | null
-      /** `/aitools project off`: the project row hidden in every project (the global aitools.json's bar.project). */
-      isProjectShown: boolean
       /** The GitHub repository the session works in; null outside one. */
       githubRepo: GithubRepo | null
       /** The project's `.claude/aitools.json` project section; null when it has none. */

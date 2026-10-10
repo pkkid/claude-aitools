@@ -49,6 +49,7 @@ import {
   expand,
   issueInBranch,
   issueInPrompt,
+  displayName,
   logPaneId,
   parseGithubRemote,
   projectFrom,
@@ -139,7 +140,6 @@ const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as cons
 const isAskable = atom({ plugin: 'aitools', key: 'isAskable' } as const, false)
 const mainModel = atom({ plugin: 'aitools', key: 'mainModel' } as const, null)
 const keepWarm = atom({ plugin: 'aitools', key: 'keepWarm' } as const, null)
-const isProjectShown = atom({ plugin: 'aitools', key: 'isProjectShown' } as const, true)
 const githubRepo = atom({ plugin: 'aitools', key: 'githubRepo' } as const, null)
 const projectConfig = atom({ plugin: 'aitools', key: 'projectConfig' } as const, null)
 const boardUrl = atom({ plugin: 'aitools', key: 'boardUrl' } as const, null)
@@ -480,6 +480,10 @@ async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTI
   await savePersonal($, { settings: normalizeSettings(changed) })
   if (normalizeSettings(changed)[key]) {
     await catchUp($, key)
+  }
+  if (key === 'projectRow') {
+    // Its servers' ports are read only while the row shows.
+    syncListenerPoll($)
   }
 }
 
@@ -1453,7 +1457,6 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   await update($, settings, () => p.settings)
   const wasHidden = await read($, isHidden)
   await update($, isHidden, () => p.isHidden)
-  await update($, isProjectShown, () => p.isProjectShown)
   await update($, helpers, () => p.helpers)
   await update($, agentShowing, () => p.showing)
   await update($, hideAfter, () => p.hideAfter)
@@ -1478,6 +1481,7 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
     await showStatus($)
     await startView($, p.view)
   }
+  syncListenerPoll($)
 }
 
 /**
@@ -1944,7 +1948,7 @@ function syncListenerPoll($: EngineInterface): void {
 
 /** Whether the project row shows: a GitHub repository, the row not turned off (by the person or the project). */
 async function isProjectRowShown($: EngineInterface): Promise<boolean> {
-  if ((await read($, isHidden)) || !(await read($, isProjectShown)) || (await read($, githubRepo)) === null) {
+  if (!(await isShown($, 'projectRow')) || (await read($, githubRepo)) === null) {
     return false
   }
 
@@ -1965,7 +1969,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
     el,
     {
       repo,
-      name: config?.name ?? repo.name,
+      name: config?.name ?? displayName(repo.name),
       boardUrl: await read($, boardUrl),
       issue: issueNumber === null ? null : { number: issueNumber, title: title?.number === issueNumber ? title.title : null },
       tools: config?.tools ?? [],
@@ -2200,13 +2204,12 @@ export const register: Register = on => {
   on('command.run', { command: 'aitools' }, async ($, e) => {
     const words = e.args.trim().toLowerCase().split(/\s+/)
     if (words[0] === 'project') {
-      const shown = words[1] === 'on' || words[1] === 'show' ? true : words[1] === 'off' || words[1] === 'hide' ? false : words[1] === undefined ? !(await read($, isProjectShown)) : null
+      const was = normalizeSettings(await read($, settings)).projectRow
+      const shown = words[1] === 'on' || words[1] === 'show' ? true : words[1] === 'off' || words[1] === 'hide' ? false : words[1] === undefined ? !was : null
       if (shown === null) {
         return { text: 'Usage: /aitools project [on|off] (no argument toggles the project row)' }
       }
-      await update($, isProjectShown, () => shown)
-      await savePersonal($, { isProjectShown: shown })
-      syncListenerPoll($)
+      if (shown !== was) await toggleSetting($, 'projectRow')
       return { text: shown ? 'Project row shown.' : 'Project row hidden in every project. /aitools project shows it again.' }
     }
     const hidden = nextHidden(e.args, await read($, isHidden))
