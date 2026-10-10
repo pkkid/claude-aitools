@@ -16,9 +16,6 @@ import {
   dockNote,
   finishCard,
   isRunning,
-  isHideAfter,
-  isShowing,
-  isTeamPick,
   newRun,
   noteActivity,
   queuePiece,
@@ -45,6 +42,20 @@ import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
 import { ASK_TOOL, askmeText, asksQuestions, isAskableIn } from '../src/askme'
+import { CONFIG_FILE, STORED_KEYS, configText, migrated, parseConfig, personalFrom, withPersonal } from '../src/config'
+import type { Json, Personal, StoredSettings } from '../src/config'
+import {
+  LOG_KEEP,
+  expand,
+  issueInBranch,
+  issueInPrompt,
+  logPaneId,
+  parseGithubRemote,
+  projectFrom,
+  renderProjectRow,
+  splitOutput,
+} from '../src/project'
+import type { ToolVars } from '../src/project'
 import {
   KEEPWARM_HELP,
   KEEPWARM_LEAD_MS,
@@ -89,11 +100,10 @@ import {
   worktreeName,
 } from '../src/worktrees'
 import type { PrFacts, Removal, WorktreeFacts } from '../src/worktrees'
-import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
-import type { KeyStore } from '../src/settings'
+import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { CiState, Worktree, WorktreeTarget } from '../types'
+import type { CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
 import type { AgentKind, AgentShowing, Brief, HelperMode, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, TeamPick, TeamSize, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
@@ -129,6 +139,15 @@ const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as cons
 const isAskable = atom({ plugin: 'aitools', key: 'isAskable' } as const, false)
 const mainModel = atom({ plugin: 'aitools', key: 'mainModel' } as const, null)
 const keepWarm = atom({ plugin: 'aitools', key: 'keepWarm' } as const, null)
+const isProjectShown = atom({ plugin: 'aitools', key: 'isProjectShown' } as const, true)
+const githubRepo = atom({ plugin: 'aitools', key: 'githubRepo' } as const, null)
+const projectConfig = atom({ plugin: 'aitools', key: 'projectConfig' } as const, null)
+const boardUrl = atom({ plugin: 'aitools', key: 'boardUrl' } as const, null)
+const promptIssue = atom({ plugin: 'aitools', key: 'promptIssue' } as const, null)
+const issueTitle = atom({ plugin: 'aitools', key: 'issueTitle' } as const, null)
+const toolRuns = atom({ plugin: 'aitools', key: 'toolRuns' } as const, {})
+const toolListeners = atom({ plugin: 'aitools', key: 'toolListeners' } as const, {})
+const toolLogs = atom({ plugin: 'aitools', key: 'toolLogs' } as const, {})
 const keepWarmStopped = atom({ plugin: 'aitools', key: 'keepWarmStopped' } as const, null)
 const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
 const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
@@ -256,9 +275,6 @@ function toWindow(limit: { percentUsed: number; resetsAt?: string } | undefined)
   return limit && { percentUsed: limit.percentUsed, resetsAt: limit.resetsAt }
 }
 
-function storeOf($: EngineInterface): KeyStore {
-  return { get: key => $.store.get(key), set: (key, value) => $.store.set(key, value) }
-}
 
 function scanIO($: EngineInterface): ScanIO {
   return {
@@ -276,10 +292,7 @@ function scanIO($: EngineInterface): ScanIO {
 }
 
 async function projectsRoot($: EngineInterface): Promise<string> {
-  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
-  const home = await $.env.get('HOME')
-
-  return `${configDir ?? `${home}/.claude`}/projects`
+  return `${await configDir($)}/projects`
 }
 
 async function readCache($: EngineInterface): Promise<ScanCache | null> {
@@ -464,7 +477,7 @@ async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTI
 
     return { ...was, [key]: !was[key] }
   })
-  await saveSettings(storeOf($), normalizeSettings(changed))
+  await savePersonal($, { settings: normalizeSettings(changed) })
   if (normalizeSettings(changed)[key]) {
     await catchUp($, key)
   }
@@ -490,7 +503,7 @@ async function catchUp($: EngineInterface, key?: ToggleKey): Promise<void> {
 async function setView($: EngineInterface, mode: ViewMode): Promise<void> {
   await update($, isToolsOpen, () => false)
   await update($, viewMode, () => mode)
-  await $.store.set('viewMode', mode)
+  await savePersonal($, { view: mode })
   await showStatus($)
   await startView($, mode)
 }
@@ -621,7 +634,7 @@ async function openDock($: EngineInterface): Promise<void> {
 /** The pane's team pick, saved for later sessions; Default stops its work, a size starts it. */
 async function setTeam($: EngineInterface, pick: TeamPick): Promise<void> {
   await update($, team, () => pick)
-  await $.store.set('agentTeam', pick)
+  await savePersonal($, { team: pick })
   await syncDock($)
   await showStatus($)
 }
@@ -629,19 +642,19 @@ async function setTeam($: EngineInterface, pick: TeamPick): Promise<void> {
 /** The dock's helper model, saved for later sessions. */
 async function setHelpers($: EngineInterface, mode: HelperMode): Promise<void> {
   await update($, helpers, () => mode)
-  await $.store.set('agentHelpers', mode)
+  await savePersonal($, { helpers: mode })
 }
 
 /** The pane's Showing pick, saved for later sessions. */
 async function setShowing($: EngineInterface, showing: AgentShowing): Promise<void> {
   await update($, agentShowing, () => showing)
-  await $.store.set('agentShowing', showing)
+  await savePersonal($, { showing })
 }
 
 /** The pane's Hide completed pick, saved for later sessions. */
 async function setHideAfter($: EngineInterface, minutes: HideAfter): Promise<void> {
   await update($, hideAfter, () => minutes)
-  await $.store.set('agentHideAfter', minutes)
+  await savePersonal($, { hideAfter: minutes })
 }
 
 /** Appends one line to the Subagents pane trace in the store, the newest TRACE_KEEP kept, one write after another. */
@@ -837,6 +850,8 @@ async function toggleMenu($: EngineInterface, menu: 'tools' | 'settings'): Promi
     }
   } else if (await update($, isSettingsOpen, open => !open)) {
     await update($, isToolsOpen, () => false)
+    // Opening the options shows the file as it stands, hand edits included.
+    await loadGlobal($)
   }
 }
 
@@ -846,6 +861,9 @@ async function onTick($: EngineInterface): Promise<void> {
     await update($, tick, n => (n ?? 0) + 1)
   }
   await checkSleep($)
+  // The config files may have been edited by hand, and the branch changed in a terminal.
+  await reloadConfigs($)
+  await refreshRepo($)
 }
 
 /** The mascot drawing last built: it only changes with the pose, so redraws of the bar reuse it. */
@@ -1027,6 +1045,8 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
       ? null
       : renderChecklist(el, await read($, checklist), isWorking, () => void update($, checklist, () => null))
 
+  const projectRow = await drawProjectRow($, el, el.Svg ? 0 : 2)
+
   return renderBar(el, view, flags, {
     toggleTools: () => void toggleMenu($, 'tools'),
     askme: () => void askFromBar($, isWorking),
@@ -1037,7 +1057,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     openDock: () => void openDock($),
     openWorktrees: () => void openWorktrees($),
     toggle: key => void toggleSetting($, key),
-  }, list)
+  }, list, projectRow)
 }
 
 async function measure($: EngineInterface, e: { rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]; context: Snapshot['context'] & {}; cost?: { usd: number } }) {
@@ -1333,10 +1353,651 @@ async function askWorktrees($: EngineInterface, target: WorktreeTarget | null): 
   await update($, worktreeAction, action => (action?.step === 'busy' ? action : target === null ? null : { step: 'ask' as const, target }))
 }
 
+// ---- aitools.json: the person's settings in ~/.claude, the project row's in the repository ----
+
+/** The global file's path, its text as last read or written, and whether it has been read since the module loaded. */
+let globalPath: string | null = null
+let globalText: string | null = null
+let isGlobalLoaded = false
+/** The project file the row reads (the session's checkout's, else the main checkout's) and its text as last read. */
+let projectPath: string | null = null
+let projectText: string | null = null
+let isProjectLoaded = false
+/** Problems already reported this load, so a file read every 30 seconds says each once. */
+const reportedProblems = new Set<string>()
+
+/** The Claude config folder: CLAUDE_CONFIG_DIR, else ~/.claude. */
+async function configDir($: EngineInterface): Promise<string> {
+  const dir = await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)
+
+  return dir ?? `${await $.env.get('HOME').catch(() => '~')}/.claude`
+}
+
+/** A file's text, or null when it is not there or cannot be read. */
+async function readText($: EngineInterface, path: string): Promise<string | null> {
+  if (!(await $.fs.exists(path).catch(() => false))) {
+    return null
+  }
+
+  return $.fs.read(path).catch(() => null)
+}
+
+/** One dim line in the chat for a problem with a config file, once per problem and load. */
+function reportProblem($: EngineInterface, text: string): void {
+  if (!reportedProblems.has(text)) {
+    reportedProblems.add(text)
+    $.ui.log(`aitools: ${text}`)
+  }
+}
+
+/** The settings the store held before the global file, until the file has taken them over. */
+async function storedSettings($: EngineInterface): Promise<StoredSettings> {
+  if ((await $.store.get('configMigrated')) === true) {
+    return {}
+  }
+  const entries = await Promise.all(STORED_KEYS.map(async key => [key, await $.store.get(key)] as const))
+
+  return Object.fromEntries(entries.filter(([, value]) => value !== undefined))
+}
+
+/** Writes the global file; true once it holds `raw`. */
+async function writeGlobal($: EngineInterface, raw: Json): Promise<boolean> {
+  const path = globalPath ?? `${await configDir($)}/${CONFIG_FILE}`
+  const text = configText(raw)
+  try {
+    await $.fs.write(path, text)
+    globalText = text
+    return true
+  } catch (err) {
+    reportProblem($, `couldn't save ${path}: ${errorText(err)}`)
+    return false
+  }
+}
+
+/**
+ * Reads the global file and puts what it says into effect. The first read fills in what it lacks (from the store,
+ * where the mod kept its settings before, else the defaults) and writes that back, so the file lists every setting;
+ * the store's copies are then dropped. A file that is not valid JSON leaves the settings as they were.
+ */
+async function loadGlobal($: EngineInterface, isLoad = false): Promise<void> {
+  globalPath ??= `${await configDir($)}/${CONFIG_FILE}`
+  const text = await readText($, globalPath)
+  if (isGlobalLoaded && text === globalText) {
+    return
+  }
+  let raw: Json = {}
+  if (text !== null) {
+    const parsed = parseConfig(text)
+    if ('error' in parsed) {
+      globalText = text
+      reportProblem($, `${globalPath} isn't valid JSON (${parsed.error}); the settings stay as they were until it is fixed`)
+      return
+    }
+    raw = parsed.value
+  }
+  globalText = text
+  const stored = await storedSettings($)
+  const filled = migrated(raw, stored)
+  const isWritten = JSON.stringify(filled) === JSON.stringify(raw) || (await writeGlobal($, filled))
+  if (isWritten && (await $.store.get('configMigrated')) !== true) {
+    await Promise.all(STORED_KEYS.map(key => $.store.delete(key).catch(() => undefined)))
+    await $.store.set('configMigrated', true)
+  }
+  isGlobalLoaded = true
+  await applyPersonal($, personalFrom(filled), isLoad)
+}
+
+/** Puts the person's settings into effect; outside a session's start, what changed catches up as a toggle would. */
+async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): Promise<void> {
+  const was = normalizeSettings(await read($, settings))
+  await update($, settings, () => p.settings)
+  const wasHidden = await read($, isHidden)
+  await update($, isHidden, () => p.isHidden)
+  await update($, isProjectShown, () => p.isProjectShown)
+  await update($, helpers, () => p.helpers)
+  await update($, agentShowing, () => p.showing)
+  await update($, hideAfter, () => p.hideAfter)
+  const wasTeam = await read($, team)
+  await update($, team, () => p.team)
+  const wasView = await read($, viewMode)
+  await update($, viewMode, () => p.view)
+  if (isLoad) {
+    return
+  }
+  if (wasHidden && !p.isHidden) {
+    await catchUp($)
+  }
+  for (const key of Object.keys(p.settings) as ToggleKey[]) {
+    if (p.settings[key] && !was[key]) await catchUp($, key)
+  }
+  if (wasTeam !== p.team) {
+    await syncDock($)
+    await showStatus($)
+  }
+  if (wasView !== p.view) {
+    await showStatus($)
+    await startView($, p.view)
+  }
+}
+
+/**
+ * Saves settings the mod's own controls changed, to the global file only: it is read again first, so only these keys
+ * change. A file that is not valid JSON is left alone, the change kept for this session.
+ */
+async function savePersonal($: EngineInterface, change: Partial<Personal>): Promise<void> {
+  globalPath ??= `${await configDir($)}/${CONFIG_FILE}`
+  const text = await readText($, globalPath)
+  let raw: Json = {}
+  if (text !== null) {
+    const parsed = parseConfig(text)
+    if ('error' in parsed) {
+      reportProblem($, `${globalPath} isn't valid JSON (${parsed.error}), so this change is kept for this session only`)
+      return
+    }
+    raw = parsed.value
+  }
+  await writeGlobal($, withPersonal(raw, change))
+}
+
+/** Reads the project's file into the row: the session's checkout's, else the main checkout's; none outside GitHub. */
+async function loadProject($: EngineInterface): Promise<void> {
+  const repo = await read($, githubRepo)
+  const paths = repo === null ? [] : [...new Set([`${repo.checkout}/.claude/${CONFIG_FILE}`, `${repo.main}/.claude/${CONFIG_FILE}`])]
+  let path: string | null = null
+  let text: string | null = null
+  for (const candidate of paths) {
+    text = await readText($, candidate)
+    if (text !== null) {
+      path = candidate
+      break
+    }
+  }
+  if (isProjectLoaded && text === projectText && path === projectPath) {
+    return
+  }
+  isProjectLoaded = true
+  projectPath = path
+  projectText = text
+  if (path === null || text === null) {
+    await update($, projectConfig, () => null)
+  } else {
+    const parsed = parseConfig(text)
+    if ('error' in parsed) {
+      reportProblem($, `${path} isn't valid JSON (${parsed.error}); the project row keeps what it had`)
+      return
+    }
+    const config = projectFrom(parsed.value)
+    for (const problem of config.problems) reportProblem($, `${path}: ${problem}`)
+    await update($, projectConfig, () => config)
+  }
+  await refreshBoard($)
+  syncListenerPoll($)
+}
+
+/** Both files again: every 30 seconds, when ⁝ opens, and after Claude edits one. */
+async function reloadConfigs($: EngineInterface): Promise<void> {
+  await loadGlobal($)
+  await loadProject($)
+}
+
+/** Whether a tool call wrote one of the mod's config files. */
+function isConfigEdit(e: { tool: string } & Record<string, unknown>): boolean {
+  const path = typeof e.file_path === 'string' ? e.file_path : typeof e.notebook_path === 'string' ? e.notebook_path : ''
+
+  return path.endsWith(`/${CONFIG_FILE}`)
+}
+
+// ---- The GitHub repository, its board and the session's issue ----
+
+/** Whether the session's first prompt has been read for an issue: later prompts leave it alone. */
+let hasFirstPrompt = false
+/** A repository read soon after a tool that can change the branch: a burst of calls reads once. */
+let repoSoon: Timer | null = null
+
+/** The GitHub repository the session works in, from the main checkout's remotes (`origin` first); null outside one. */
+async function readRepo($: EngineInterface): Promise<GithubRepo | null> {
+  const cwd = await $.session.cwd().catch(() => null)
+  if (cwd === null) {
+    return null
+  }
+  const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
+  if (top.exitCode !== 0) {
+    return null
+  }
+  const checkout = top.stdout.trim()
+  const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd)
+  const main = common.exitCode === 0 ? common.stdout.trim().replace(/\/\.git\/?$/, '') : checkout
+  const remotes = (await git($, ['remote', '-v'], main)).stdout
+    .split('\n')
+    .map(line => line.split(/\s+/))
+    .filter((parts): parts is [string, string, ...string[]] => parts.length >= 2 && parts[0] !== '' && parts[1] !== undefined)
+  const ordered = [...remotes.filter(([name]) => name === 'origin'), ...remotes.filter(([name]) => name !== 'origin')]
+  const found = ordered.map(([, url]) => parseGithubRemote(url)).find(r => r !== null)
+  if (!found) {
+    return null
+  }
+  const branch = (await git($, ['branch', '--show-current'], cwd)).stdout.trim()
+
+  return { ...found, url: `https://github.com/${found.owner}/${found.name}`, checkout, main, branch }
+}
+
+/** Reads the repository again; a new one brings its project file and board, a new branch its issue. */
+async function refreshRepo($: EngineInterface): Promise<void> {
+  const next = await readRepo($)
+  const was = await read($, githubRepo)
+  if (JSON.stringify(next) === JSON.stringify(was)) {
+    return
+  }
+  await update($, githubRepo, () => next)
+  if (next?.url !== was?.url || next?.checkout !== was?.checkout) {
+    isProjectLoaded = false
+    await loadProject($)
+  }
+  await refreshIssueTitle($)
+}
+
+function refreshRepoSoon($: EngineInterface): void {
+  repoSoon?.cancel()
+  repoSoon = $.clock.after(AFTER_TOOL_MS, () => {
+    repoSoon = null
+    void refreshRepo($)
+  })
+}
+
+/** How long a board lookup is kept: GitHub's API budget is shared with everything signed in as the person. */
+const BOARD_KEEP_MS = 24 * 60 * 60_000
+
+type BoardCache = Record<string, { at: number; url: string | null }>
+
+/**
+ * The repository's GitHub Project board: the project file's `board`, else the one Project linked to the repository
+ * (none when there are several), looked up once a day through `gh`. Reading Projects needs `gh`'s `read:project`
+ * scope; without it there is no board unless the file names one.
+ */
+async function refreshBoard($: EngineInterface): Promise<void> {
+  const repo = await read($, githubRepo)
+  const config = await read($, projectConfig)
+  if (repo === null || config?.board === false) {
+    await update($, boardUrl, () => null)
+    return
+  }
+  if (typeof config?.board === 'string') {
+    const url = config.board
+    await update($, boardUrl, () => url)
+    return
+  }
+  const slugKey = `${repo.owner}/${repo.name}`
+  const cache = ((await $.store.get('boards')) as BoardCache | undefined) ?? {}
+  const now = await $.clock.now()
+  const kept = cache[slugKey]
+  if (kept !== undefined && now - kept.at < BOARD_KEEP_MS) {
+    await update($, boardUrl, () => kept.url)
+    return
+  }
+  const query = 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){projectsV2(first:2){totalCount nodes{url}}}}'
+  const result = await $.process
+    .run(['gh', 'api', 'graphql', '-f', `query=${query}`, '-f', `owner=${repo.owner}`, '-f', `name=${repo.name}`], {
+      cwd: repo.main,
+      env: { GH_PROMPT_DISABLED: '1' },
+      timeoutMs: 20_000,
+    })
+    .catch(() => null)
+  let url: string | null = null
+  if (result?.exitCode === 0) {
+    try {
+      const projects = JSON.parse(result.stdout)?.data?.repository?.projectsV2
+      url = projects?.totalCount === 1 && typeof projects.nodes?.[0]?.url === 'string' ? projects.nodes[0].url : null
+    } catch {
+      url = null
+    }
+  }
+  const fresh = Object.fromEntries(Object.entries(cache).filter(([, v]) => now - v.at < BOARD_KEEP_MS))
+  await $.store.set('boards', { ...fresh, [slugKey]: { at: now, url } })
+  await update($, boardUrl, () => url)
+}
+
+/** The issue the row links to: the one the first prompt names, else the one the branch is named for. */
+async function currentIssue($: EngineInterface): Promise<number | null> {
+  const fromPrompt = await read($, promptIssue)
+  const repo = await read($, githubRepo)
+
+  return fromPrompt ?? (repo === null ? null : issueInBranch(repo.branch))
+}
+
+/** Reads the session's first prompt for an issue, once: as it is sent, or from the transcript after a load. */
+async function noteFirstPrompt($: EngineInterface, text: string): Promise<void> {
+  if (hasFirstPrompt) {
+    return
+  }
+  hasFirstPrompt = true
+  const issue = issueInPrompt(text)
+  await update($, promptIssue, () => issue)
+  await refreshIssueTitle($)
+}
+
+/** How many issue titles the store keeps. */
+const TITLES_KEEP = 200
+
+/** The linked issue's title, from the store or GitHub's REST API (one call per issue, kept). */
+async function refreshIssueTitle($: EngineInterface): Promise<void> {
+  const repo = await read($, githubRepo)
+  const issue = await currentIssue($)
+  if (repo === null || issue === null) {
+    return
+  }
+  if ((await read($, issueTitle))?.number === issue) {
+    return
+  }
+  const key = `${repo.owner}/${repo.name}#${issue}`
+  const titles = ((await $.store.get('issueTitles')) as Record<string, string> | undefined) ?? {}
+  let title: string | undefined = titles[key]
+  if (title === undefined) {
+    const result = await $.process
+      .run(['gh', 'api', `repos/${repo.owner}/${repo.name}/issues/${issue}`, '--jq', '.title'], {
+        cwd: repo.main,
+        env: { GH_PROMPT_DISABLED: '1' },
+        timeoutMs: 20_000,
+      })
+      .catch(() => null)
+    title = result?.exitCode === 0 ? result.stdout.trim() : undefined
+    if (title) {
+      const kept = Object.entries(titles).slice(-(TITLES_KEEP - 1))
+      await $.store.set('issueTitles', { ...Object.fromEntries(kept), [key]: title })
+    }
+  }
+  if (title) {
+    const found = title
+    await update($, issueTitle, () => ({ number: issue, title: found }))
+  }
+}
+
+/** Opens a link in the person's default browser: `xdg-open`, else macOS's `open`, else Windows' `start`. */
+async function openInBrowser($: EngineInterface, url: string): Promise<void> {
+  for (const argv of [['xdg-open', url], ['open', url], ['cmd', '/c', 'start', '', url]]) {
+    const result = await $.process.run(argv, { timeoutMs: 10_000 }).catch(() => null)
+    if (result?.exitCode === 0) return
+  }
+  $.ui.log(`aitools: couldn't open ${url} in a browser`, { to: 'debug' })
+}
+
+// ---- The project row's tools: links, commands, servers ----
+
+/** Bumped per start or stop of a tool, so output from a replaced run is ignored. */
+const toolGenerations = new Map<string, number>()
+/** Each running tool's child, ended to stop a server that names no stop command. */
+const toolChildren = new Map<string, AsyncGenerator<unknown, unknown>>()
+/** The timer that reads what listens on the server tools' ports, while any names a port. */
+let listenerTimer: Timer | null = null
+let isPollingListeners = false
+/** How often the servers' ports are read. */
+const LISTENER_POLL_MS = 3000
+
+async function toolById($: EngineInterface, id: string): Promise<ProjectTool | null> {
+  return (await read($, projectConfig))?.tools.find(t => t.id === id) ?? null
+}
+
+/** The values a tool's commands and links may name: `{checkout}`, `{main}`, `{branch}`, `{repo}`, `{issue}`, … */
+async function toolVars($: EngineInterface, tool: ProjectTool): Promise<ToolVars | null> {
+  const repo = await read($, githubRepo)
+  if (repo === null) {
+    return null
+  }
+  const issue = await currentIssue($)
+
+  return {
+    checkout: repo.checkout,
+    main: repo.main,
+    branch: repo.branch,
+    repo: `${repo.owner}/${repo.name}`,
+    owner: repo.owner,
+    name: repo.name,
+    issue: issue === null ? '' : String(issue),
+    port: tool.type === 'server' && tool.port !== undefined ? String(tool.port) : '',
+  }
+}
+
+async function setRun($: EngineInterface, id: string, generation: number, run: ToolRun | null): Promise<boolean> {
+  if (toolGenerations.get(id) !== generation) {
+    return false
+  }
+  await update($, toolRuns, runs => {
+    const next = { ...runs }
+    if (run === null) delete next[id]
+    else next[id] = run
+    return next
+  })
+
+  return true
+}
+
+async function appendLog($: EngineInterface, id: string, generation: number, lines: readonly string[]): Promise<void> {
+  if (lines.length === 0) {
+    return
+  }
+  await update($, toolLogs, logs =>
+    toolGenerations.get(id) === generation ? { ...logs, [id]: [...(logs[id] ?? []), ...lines].slice(-LOG_KEEP) } : logs,
+  )
+  void $.ui.scroll({ in: logPaneId(id), to: 'end' }).catch(() => undefined)
+}
+
+/**
+ * Runs a command or starts a server as the mod's own child, its output into the tool's log: a server is ready once
+ * its `ready` pattern shows (its first group, a URL, kept), a command passes when it exits 0. Only a press runs one.
+ */
+async function runTool($: EngineInterface, id: string): Promise<void> {
+  const tool = await toolById($, id)
+  if (tool === null || tool.type === 'link') {
+    return
+  }
+  const vars = await toolVars($, tool)
+  if (vars === null) {
+    return
+  }
+  const generation = (toolGenerations.get(id) ?? 0) + 1
+  toolGenerations.set(id, generation)
+  const argv = (tool.type === 'server' ? tool.start : tool.run).map(arg => expand(arg, vars))
+  const cwd = tool.cwd === undefined ? vars.checkout : expand(tool.cwd, vars)
+  const isServer = tool.type === 'server'
+  const ready = isServer && tool.ready !== undefined ? new RegExp(tool.ready) : null
+  await update($, toolLogs, logs => ({ ...logs, [id]: [`$ ${argv.join(' ')}`] }))
+  await setRun($, id, generation, { phase: isServer ? (ready ? 'starting' : 'running') : 'running', branch: vars.branch, detail: '' })
+  if (!isServer) {
+    await openLog($, id)
+  }
+  let rest = ''
+  try {
+    const child = $.process.spawn({ argv, cwd })
+    toolChildren.set(id, child)
+    for await (const { text } of child) {
+      if (toolGenerations.get(id) !== generation) continue
+      const split = splitOutput(rest, text)
+      rest = split.rest
+      await appendLog($, id, generation, split.lines)
+      const match = ready === null ? null : split.lines.map(line => ready.exec(line)).find(m => m !== null)
+      if (match) await setRun($, id, generation, { phase: 'ready', branch: vars.branch, detail: match[1] ?? '' })
+    }
+    const { code, signal } = await child.result
+    await appendLog($, id, generation, rest ? [rest] : [])
+    const reason = signal ?? `code ${code}`
+    await setRun($, id, generation, isServer ? { phase: 'exited', branch: vars.branch, detail: reason } : { phase: code === 0 ? 'passed' : 'failed', branch: vars.branch, detail: reason })
+  } catch (err) {
+    await appendLog($, id, generation, [errorText(err)])
+    await setRun($, id, generation, { phase: 'failed', branch: vars.branch, detail: errorText(err) })
+  } finally {
+    if (toolGenerations.get(id) === generation) toolChildren.delete(id)
+  }
+}
+
+/**
+ * Stops a server: its `stop` command when it names one, else this session's own child, and what listens on its port.
+ * Its port is read again at once, so the button turns back without waiting for the next read.
+ */
+async function stopTool($: EngineInterface, id: string): Promise<void> {
+  const tool = await toolById($, id)
+  if (tool?.type !== 'server') {
+    return
+  }
+  const vars = await toolVars($, tool)
+  const generation = (toolGenerations.get(id) ?? 0) + 1
+  toolGenerations.set(id, generation)
+  const listener = (await read($, toolListeners))[id] ?? null
+  await setRun($, id, generation, { phase: 'stopping', branch: listener?.label ?? vars?.branch ?? '', detail: '' })
+  let error = ''
+  if (tool.stop !== undefined && vars !== null) {
+    const result = await $.process
+      .run(tool.stop.map(arg => expand(arg, vars)), { cwd: vars.checkout, timeoutMs: 60_000 })
+      .catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: errorText(err) }))
+    if (result.exitCode !== 0) error = result.stderr.trim() || `exit ${result.exitCode}`
+  } else {
+    const child = toolChildren.get(id)
+    toolChildren.delete(id)
+    await child?.return(undefined).catch(() => undefined)
+    if (listener?.pid != null) {
+      await $.process.run(['kill', String(listener.pid)]).catch(() => null)
+    }
+  }
+  await setRun($, id, generation, error ? { phase: 'failed', branch: '', detail: error } : null)
+  await pollListeners($)
+}
+
+/** Opens a tool's log pane, scrolled to its newest line. */
+async function openLog($: EngineInterface, id: string): Promise<void> {
+  const tool = await toolById($, id)
+  await $.ui.open({ id: logPaneId(id), title: `${tool?.label ?? id} log` })
+  void $.ui.scroll({ in: logPaneId(id), to: 'end' }).catch(() => undefined)
+}
+
+/** Closes a tool's log pane while it shows, else opens it. */
+async function toggleLog($: EngineInterface, id: string): Promise<void> {
+  const pane = (await $.ui.panes()).find(p => p.id === logPaneId(id))
+  if (pane?.isShown) {
+    await $.ui.close({ id: logPaneId(id) })
+    return
+  }
+  await openLog($, id)
+}
+
+/**
+ * What listens on a port, whoever started it (another session, an editor, a terminal): its checkout and branch,
+ * through its process's working folder; null when nothing does. Reads `ss` and `/proc`, so Linux only.
+ */
+async function findListener($: EngineInterface, port: number): Promise<ToolListener | null> {
+  const ss = await $.process.run(['ss', '-ltnHp', `sport = :${port}`], { timeoutMs: 5000 }).catch(() => null)
+  if (!ss?.stdout.trim()) {
+    return null
+  }
+  const pid = ss.stdout.match(/pid=(\d+)/)?.[1]
+  if (pid === undefined) {
+    return { checkout: '', label: 'another user', pid: null }
+  }
+  const link = await $.process.run(['readlink', `/proc/${pid}/cwd`], { timeoutMs: 5000 }).catch(() => null)
+  const dir = link?.exitCode === 0 ? link.stdout.trim() : ''
+  if (!dir) {
+    return { checkout: '', label: `pid ${pid}`, pid: Number(pid) }
+  }
+  if (dir.endsWith(' (deleted)')) {
+    return { checkout: dir.slice(0, -' (deleted)'.length), label: 'removed worktree', pid: Number(pid) }
+  }
+  const top = await git($, ['-C', dir, 'rev-parse', '--show-toplevel'], dir)
+  if (top.exitCode !== 0) {
+    return { checkout: dir, label: dir, pid: Number(pid) }
+  }
+  const branch = (await git($, ['-C', dir, 'branch', '--show-current'], dir)).stdout.trim()
+
+  return { checkout: top.stdout.trim(), label: branch || 'detached', pid: Number(pid) }
+}
+
+/** Reads every server tool's port, redrawing only when what listens changed; one read at a time. */
+async function pollListeners($: EngineInterface): Promise<void> {
+  if (isPollingListeners) {
+    return
+  }
+  isPollingListeners = true
+  try {
+    const servers = ((await read($, projectConfig))?.tools ?? []).filter(
+      (t): t is Extract<ProjectTool, { type: 'server' }> => t.type === 'server' && t.port !== undefined,
+    )
+    const found = Object.fromEntries(await Promise.all(servers.map(async t => [t.id, await findListener($, t.port ?? 0)] as const)))
+    if (JSON.stringify(found) !== JSON.stringify(await read($, toolListeners))) {
+      await update($, toolListeners, () => found)
+    }
+  } finally {
+    isPollingListeners = false
+  }
+}
+
+/** Reads the servers' ports while the row shows and a server names a port; stops reading otherwise. */
+function syncListenerPoll($: EngineInterface): void {
+  void (async () => {
+    const config = await read($, projectConfig)
+    const isWanted =
+      (await isProjectRowShown($)) && (config?.tools.some(t => t.type === 'server' && t.port !== undefined) ?? false)
+    if (isWanted) {
+      listenerTimer ??= $.clock.every(LISTENER_POLL_MS, () => void pollListeners($))
+      await pollListeners($)
+      return
+    }
+    listenerTimer?.cancel()
+    listenerTimer = null
+  })()
+}
+
+/** Whether the project row shows: a GitHub repository, the row not turned off (by the person or the project). */
+async function isProjectRowShown($: EngineInterface): Promise<boolean> {
+  if ((await read($, isHidden)) || !(await read($, isProjectShown)) || (await read($, githubRepo)) === null) {
+    return false
+  }
+
+  return (await read($, projectConfig))?.isEnabled ?? true
+}
+
+/** The project row for the band, or null where it does not show. */
+async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderProjectRow>[0], gap: number) {
+  const repo = await read($, githubRepo)
+  if (repo === null || !(await isProjectRowShown($))) {
+    return null
+  }
+  const config = await read($, projectConfig)
+  const issueNumber = (await read($, promptIssue)) ?? issueInBranch(repo.branch)
+  const title = await read($, issueTitle)
+
+  return renderProjectRow(
+    el,
+    {
+      repo,
+      name: config?.name ?? repo.name,
+      boardUrl: await read($, boardUrl),
+      issue: issueNumber === null ? null : { number: issueNumber, title: title?.number === issueNumber ? title.title : null },
+      tools: config?.tools ?? [],
+      runs: await read($, toolRuns),
+      listeners: await read($, toolListeners),
+      gap,
+    },
+    {
+      open: url => void openToolUrl($, url),
+      startServer: id => void runTool($, id),
+      stopServer: id => void stopTool($, id),
+      toggleLog: id => void toggleLog($, id),
+      runCommand: id => void runTool($, id),
+    },
+  )
+}
+
+/** Opens a row link: a link tool's URL may name the repository's values in braces. */
+async function openToolUrl($: EngineInterface, url: string): Promise<void> {
+  const repo = await read($, githubRepo)
+  const issue = await currentIssue($)
+  const vars: ToolVars | null =
+    repo === null
+      ? null
+      : { checkout: repo.checkout, main: repo.main, branch: repo.branch, repo: `${repo.owner}/${repo.name}`, owner: repo.owner, name: repo.name, issue: issue === null ? '' : String(issue), port: '' }
+  await openInBrowser($, vars === null ? url : expand(url, vars))
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const loaded = await loadSettings(storeOf($))
-    await update($, settings, () => loaded)
+    // The person's settings, from ~/.claude/aitools.json (taken over from the store the first time).
+    await loadGlobal($, true)
     // $.state outlives a hot reload: a snapshot already there is this session's, so keep it.
     // A new session carries over only the limits; thread cost and context are its own.
     if ((await read($, snapshot)) === null) {
@@ -1350,8 +2011,6 @@ export const register: Register = on => {
       }
       await update($, snapshot, () => fresh)
     }
-    const hidden = (await $.store.get('isHidden')) === true
-    await update($, isHidden, () => hidden)
     await restoreCacheAt($)
     // The chat's model, before its first request here (a resumed session): what a cold cache is priced at.
     if ((await read($, mainModel)) === null) {
@@ -1363,16 +2022,21 @@ export const register: Register = on => {
     // The tick redraws countdowns while the bar shows, and checks whether the mascot has stood idle long enough to
     // fall asleep.
     $.clock.every(TICK_MS, () => void onTick($))
-    await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar', argumentHint: '[on|off]' })
-    const savedView = await $.store.get('viewMode')
-    const view: ViewMode = savedView === 'task' || savedView === 'clean' ? savedView : 'off'
-    await update($, viewMode, () => view)
+    await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar, or its project row', argumentHint: '[on|off|project [on|off]]' })
+    const view = await read($, viewMode)
     await showStatus($)
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back, for
     // what is on.
     await startView($, view)
     const rows = await $.session.messages().catch(() => [])
     await update($, isAskable, () => isAskableIn(rows))
+    // The project row: the repository, its file, and the issue the first prompt named (read from the transcript on
+    // a load; a new session's comes with its first prompt).
+    await refreshRepo($)
+    await loadProject($)
+    const first = rows.find(row => row.role === 'user' && row.text.trim() && !row.toolResults?.length)
+    if (first !== undefined) await noteFirstPrompt($, first.text)
+    await refreshIssueTitle($)
     if (await isMascotOn($)) {
       const isAsked = isQuestionOpenIn(rows)
       await update($, isQuestionOpen, () => isAsked)
@@ -1389,14 +2053,6 @@ export const register: Register = on => {
     }
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
-    const savedTeam = await $.store.get('agentTeam')
-    const savedHelpers = await $.store.get('agentHelpers')
-    await update($, team, () => (isTeamPick(savedTeam) ? savedTeam : 'default'))
-    await update($, helpers, () => (savedHelpers === 'fast' ? 'fast' : 'same'))
-    const savedShowing = await $.store.get('agentShowing')
-    const savedHideAfter = await $.store.get('agentHideAfter')
-    await update($, agentShowing, () => (isShowing(savedShowing) ? savedShowing : 'all'))
-    await update($, hideAfter, () => (isHideAfter(savedHideAfter) ? savedHideAfter : DEFAULT_HIDE_AFTER))
     await $.command.register({ name: 'subagents', description: 'Open or close the Subagents pane' })
     // A reload starts the module's bookkeeping over: the running lines are the subagents still at work.
     liveHelpers.clear()
@@ -1542,12 +2198,24 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'aitools' }, async ($, e) => {
+    const words = e.args.trim().toLowerCase().split(/\s+/)
+    if (words[0] === 'project') {
+      const shown = words[1] === 'on' || words[1] === 'show' ? true : words[1] === 'off' || words[1] === 'hide' ? false : words[1] === undefined ? !(await read($, isProjectShown)) : null
+      if (shown === null) {
+        return { text: 'Usage: /aitools project [on|off] (no argument toggles the project row)' }
+      }
+      await update($, isProjectShown, () => shown)
+      await savePersonal($, { isProjectShown: shown })
+      syncListenerPoll($)
+      return { text: shown ? 'Project row shown.' : 'Project row hidden in every project. /aitools project shows it again.' }
+    }
     const hidden = nextHidden(e.args, await read($, isHidden))
     if (hidden === null) {
       return { text: 'Usage: /aitools [on|off] (no argument toggles the bar)' }
     }
     await update($, isHidden, () => hidden)
-    await $.store.set('isHidden', hidden)
+    await savePersonal($, { isHidden: hidden })
+    syncListenerPoll($)
     if (!hidden) {
       await catchUp($)
     }
@@ -1610,6 +2278,8 @@ export const register: Register = on => {
   // A view on, or the pane with a team picked, adds its note.
   on('prompt.submit', async ($, e, next) => {
     if (PERSON_ORIGINS.has(e.origin.kind)) {
+      // The session's first prompt names the issue the project row links to, if any.
+      await noteFirstPrompt($, e.text)
       await update($, checklist, () => null)
       await update($, isQuestionOpen, () => false)
       await update($, isAskable, () => false)
@@ -1865,7 +2535,43 @@ export const register: Register = on => {
       if (CHANGING_TOOLS.has(e.tool) && (await read($, isWorktreesOpen))) {
         worktreesSoon($)
       }
+      // An edit to either aitools.json takes effect at once; a tool that can change the branch reads the repository
+      // soon, for the project row's issue and its tools' {branch}.
+      if (e.agentId === undefined && isConfigEdit(e as unknown as { tool: string } & Record<string, unknown>)) {
+        await reloadConfigs($)
+      }
+      if (e.agentId === undefined && CHANGING_TOOLS.has(e.tool)) {
+        refreshRepoSoon($)
+      }
     }
+  })
+
+  // A tool's log, every kept line; the pane's window scrolls over them, following the newest.
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!e.requestId.startsWith('aitools-log-')) {
+      return next(e)
+    }
+    const { Box, Text } = $.ui.resolve(e)
+    const id = e.requestId.slice('aitools-log-'.length)
+    const lines = (await read($, toolLogs))[id] ?? []
+    const listener = (await read($, toolListeners))[id]
+    if (lines.length === 0) {
+      return (
+        <Text dimColor>
+          {listener ? `${listener.label} is serving its port, started outside this session: its log is not here.` : 'No output yet.'}
+        </Text>
+      )
+    }
+
+    return (
+      <Box flexDirection="column">
+        {lines.map((line, i) => (
+          <Text key={`line-${i}`} dimColor>
+            {line || ' '}
+          </Text>
+        ))}
+      </Box>
+    )
   })
 
   // Questions put as pop-up choices need no ? button for the rest of the request.

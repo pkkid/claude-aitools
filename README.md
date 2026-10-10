@@ -44,6 +44,16 @@ left of **🛠**. Pressing it runs `/askme`.
 
 ![The tools row and the display options](docs/images/menus.svg)
 
+### Project row
+
+In a GitHub repository a second row shows the project you're working on: the repository's name, its GitHub Project
+board, and the issue the session is about (from your first message, or the branch name), each opening in your browser.
+On the right go the tools your project's own `.claude/aitools.json` defines: links, commands such as tests, and
+servers with a status and a Start/Stop button. See [the project row](plugins/aitools/README.md#project-row) for the
+file.
+
+All of the bar's own settings live in `~/.claude/aitools.json`, which you can edit by hand.
+
 ### Task View and Clean View
 
 Turn on **Task View** from the 🛠 row and, for any request that takes real work, Claude lays out its plan as a
@@ -90,7 +100,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 
 | Type | To |
 |---|---|
-| `/aitools` | Hide or show the whole bar (`/aitools on`, `/aitools off`) |
+| `/aitools` | Hide or show the whole bar (`/aitools on`, `/aitools off`), or the project row (`/aitools project off`) |
 | `/handoff` | Write a handoff brief into the chat and copy it |
 | `/keepwarm` | Keep the prompt cache warm while you're away: `/keepwarm` for 6 hours, `/keepwarm 90m`, `/keepwarm off`. A ☼ shows on the bar while it runs |
 | `/askme` | Ask the questions from Claude's last answer again as pop-up choices, with a recommendation first |

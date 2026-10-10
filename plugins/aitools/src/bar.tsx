@@ -1,4 +1,4 @@
-import type { Elements } from 'claude-code'
+import type { Elements, RenderChildren } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
 import { coldCacheUsd } from './pricing'
@@ -254,6 +254,8 @@ export function renderBar(
     toggle(key: ToggleKey): void
   },
   checklist: ReturnType<typeof renderChecklist> = null,
+  /** The project row, drawn right under the bar; null outside a GitHub repository. */
+  projectRow: RenderChildren | null = null,
 ) {
   const { Box, Text, Button, Svg } = el
   const isHandoffIdle = !flags.isWorking && !flags.isHandingOff
@@ -349,15 +351,21 @@ export function renderBar(
       </Box>
     )
   }
+  const bars = projectRow === null ? bar : (
+    <Box flexDirection="column">
+      {bar}
+      {projectRow}
+    </Box>
+  )
   if (!menu && !checklist) {
-    return bar
+    return bars
   }
 
   // An open menu (🛠 or ⁝) sits above the bar and the checklist below it, so the bar itself never shifts.
   return (
     <Box flexDirection="column" gap={1}>
       {menu}
-      {bar}
+      {bars}
       {checklist}
     </Box>
   )

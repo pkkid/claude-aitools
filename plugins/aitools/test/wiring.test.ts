@@ -218,7 +218,8 @@ describe('wiring', () => {
     })
     expect(result.text).toBe(`Handoff brief\n\n${brief}`)
     expect(copies).toEqual([brief])
-    expect(writes).toEqual([])
+    // The settings file is written on a first run; the brief is never.
+    expect(writes.filter(path => !path.endsWith('/aitools.json'))).toEqual([])
   })
 
   describe('the ? button', () => {
@@ -1565,9 +1566,12 @@ describe('wiring', () => {
 
     test('nothing is read while the pane is closed; open, it reads git and GitHub, and keeps reading', async ($, on) => {
       const repo = fakeRepo(on)
+      // The project row looks for a GitHub remote whether the pane is open or not; those reads are its own.
+      const rowCalls = new Set(['git rev-parse --show-toplevel', 'git rev-parse --path-format=absolute --git-common-dir', 'git remote -v'])
+      const paneCalls = () => repo.calls.filter(c => !rowCalls.has(c))
       await start($, on, { usd: 0 })
       await clock.advance(60_000)
-      expect(repo.calls).toEqual([])
+      expect(paneCalls()).toEqual([])
       expect((await run($, 'worktrees')).text).toBe('Worktrees open.')
       await clock.settle()
       expect(repo.calls).toContain('git worktree list --porcelain')
@@ -1581,11 +1585,11 @@ describe('wiring', () => {
       await clock.advance(10_000)
       expect(repo.calls.length).toBeGreaterThan(reads)
       expect((await run($, 'worktrees')).text).toBe('Worktrees closed.')
-      const closed = repo.calls.length
+      const closed = paneCalls().length
       await clock.advance(120_000)
       await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
       await clock.advance(5000)
-      expect(repo.calls.length).toBe(closed)
+      expect(paneCalls().length).toBe(closed)
     })
 
     test('GitHub is read on open and every 5 minutes after; Refresh reads it now and restarts the wait', async ($, on) => {
@@ -1819,6 +1823,233 @@ describe('wiring', () => {
       expect((await run($, 'soon')).text).toMatch(/^Keeps the prompt cache warm/)
       expect((await run($, 'help')).text).toContain('/keepwarm 90m')
       expect((await run($, '')).text).toMatch(/^Keeping the cache warm for 6h0m more/)
+    })
+  })
+
+  describe('project row', () => {
+    const GLOBAL = '/home/test/.claude/aitools.json'
+    const PROJECT = '/r/.claude/aitools.json'
+    type World = {
+      files: Map<string, string>
+      calls: string[]
+      opened: string[]
+      remote: string
+      branch: string
+      listener: string
+      spawned: string[][]
+      /** Ends the running server child, as its process exiting would. */
+      endServer: () => void
+    }
+
+    /** A checkout at /r with a GitHub remote, a disk of `files`, a browser, `ss`, `gh` and a server to spawn. */
+    function world(on: On, files: Record<string, string> = {}): World {
+      const w: World = { files: new Map(Object.entries(files)), calls: [], opened: [], remote: 'git@github.com:pkkid/vowelit.git', branch: 'main', listener: '', spawned: [], endServer: () => undefined }
+      on('session.cwd', () => ({ value: '/r' }))
+      on('fs.exists', (_, e) => ({ value: w.files.has(e.path) }))
+      on('fs.read', (_, e) => ({ value: w.files.get(e.path) ?? '' }))
+      on('fs.write', (_, e) => {
+        w.files.set(e.path, e.text)
+        return { value: undefined }
+      })
+      const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+      on('process.run', (_, e) => {
+        const [cmd, ...given] = e.argv
+        // `git -C <dir> …` reads another folder: the same answers.
+        const args = given[0] === '-C' ? given.slice(2) : given
+        w.calls.push(e.argv.join(' '))
+        if (cmd === 'git' && args[0] === 'rev-parse') return ok(args[1] === '--show-toplevel' ? '/r\n' : '/r/.git\n')
+        if (cmd === 'git' && args[0] === 'remote') return ok(`origin\t${w.remote} (fetch)\norigin\t${w.remote} (push)\n`)
+        if (cmd === 'git' && args[0] === 'branch') return ok(`${w.branch}\n`)
+        if (cmd === 'gh' && args[1] === 'graphql') return ok(JSON.stringify({ data: { repository: { projectsV2: { totalCount: 1, nodes: [{ url: 'https://github.com/users/pkkid/projects/1' }] } } } }))
+        if (cmd === 'gh' && args[1]?.includes('/issues/')) return ok(`Issue ${args[1].split('/').at(-1)} title\n`)
+        if (cmd === 'xdg-open') {
+          w.opened.push(args[0] ?? '')
+          return ok()
+        }
+        if (cmd === 'ss') return ok(w.listener)
+        if (cmd === 'readlink') return ok('/r\n')
+        return ok()
+      })
+      on('process.spawn', async function* (_, e) {
+        w.spawned.push([...e.argv])
+        let end = () => undefined as void
+        const ended = new Promise<void>(resolve => {
+          end = resolve
+        })
+        w.endServer = end
+        if (e.argv.some(arg => arg.endsWith('serve'))) {
+          yield { stream: 'stdout' as const, text: 'building\nLocal preview ready: http://localhost:8000\n' }
+          await ended
+          return { value: { code: null, signal: 'SIGTERM' } }
+        }
+        yield { stream: 'stdout' as const, text: 'all 3 tests passed\n' }
+        return { value: { code: 0, signal: null } }
+      })
+      on('ui.scroll', () => ({}))
+      return w
+    }
+
+    const rowText = async ($: Engine) => {
+      const ui = await $.ui.mount(band())
+      const keys = (await ui.findAll({})).map(n => n.key).filter((k): k is string => typeof k === 'string' && (k.startsWith('project-') || k.startsWith('tool-')))
+      const text = Object.fromEntries(await Promise.all(keys.map(async k => [k, (await ui.find({ key: k }))?.text] as const)))
+      await ui.unmount()
+      return text
+    }
+    const say = ($: Engine, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+
+    test('outside a GitHub repository there is no row', async ($, on) => {
+      const w = world(on)
+      w.remote = 'https://gitlab.com/pkkid/vowelit.git'
+      await start($, on, { usd: 0 })
+      expect(await rowText($)).toEqual({})
+    })
+
+    test("the repository's name, its board and the first prompt's issue, each opening in the browser", async ($, on) => {
+      const w = world(on)
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 })
+      await say($, 'Please fix #42 today')
+      await say($, 'and #50 too')
+      const row = await rowText($)
+      expect(row['project-name']).toBe('vowelit')
+      expect(row['project-board']).toBe('Project')
+      expect(row['project-issue']).toBe('#42 Issue 42 title')
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'project-name' })
+      await ui.press({ key: 'project-board' })
+      await ui.press({ key: 'project-issue' })
+      await ui.unmount()
+      await clock.settle()
+      expect(w.opened).toEqual(['https://github.com/pkkid/vowelit', 'https://github.com/users/pkkid/projects/1', 'https://github.com/pkkid/vowelit/issues/42'])
+    })
+
+    test('the branch names the issue when the first prompt does not; the prompt wins when both do', async ($, on) => {
+      const w = world(on)
+      w.branch = 'feat/77-login'
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 })
+      expect((await rowText($))['project-issue']).toBe('#77 Issue 77 title')
+      await say($, 'Work on #42')
+      expect((await rowText($))['project-issue']).toBe('#42 Issue 42 title')
+    })
+
+    test("the project's file: its name, no board, and tools on the right", async ($, on) => {
+      const w = world(on, {
+        [PROJECT]: JSON.stringify({ project: { name: 'Vowelit', board: false, tools: [{ type: 'link', label: 'Docs', url: 'https://docs/{branch}' }, { type: 'command', label: 'Test', run: ['npm', 'test'] }] } }),
+      })
+      await start($, on, { usd: 0 })
+      const row = await rowText($)
+      expect(row['project-name']).toBe('Vowelit')
+      expect(row['project-board']).toBeUndefined()
+      expect(w.calls.some(c => c.includes('graphql'))).toBe(false)
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tool-docs' })
+      await ui.press({ key: 'tool-test-run' })
+      await clock.settle()
+      expect(w.opened).toEqual(['https://docs/main'])
+      expect(w.spawned).toEqual([['npm', 'test']])
+      expect(await ui.find({ text: '● ' })).toBeDefined()
+      await ui.unmount()
+      const log = await $.ui.mount({ plugin: 'aitools', surface: 'desktop', component: 'Pane', requestId: 'aitools-log-test', props: { ...PANE, title: 'Test log' } })
+      expect((await log.findAll({ type: 'Text' })).map(t => t.text)).toEqual(['$ npm test', 'all 3 tests passed'])
+      await log.unmount()
+    })
+
+    test('a server: Start runs it, its status follows its output, Stop runs its stop command', async ($, on) => {
+      const w = world(on, {
+        [PROJECT]: JSON.stringify({ project: { tools: [{ type: 'server', label: 'Server', start: ['{main}/serve', '{checkout}'], stop: ['{main}/stop', '{checkout}'], ready: 'ready: (\\S+)' }] } }),
+      })
+      await start($, on, { usd: 0 })
+      expect(await rowText($)).toMatchObject({ 'tool-server-log': 'Stopped', 'tool-server-start': 'Start Server' })
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tool-server-start' })
+      await clock.settle()
+      expect(w.spawned).toEqual([['/r/serve', '/r']])
+      expect((await ui.find({ key: 'tool-server-log' }))?.text).toBe('Running main')
+      await ui.press({ key: 'tool-server-stop' })
+      await clock.settle()
+      expect(w.calls).toContain('/r/stop /r')
+      w.endServer()
+      await clock.settle()
+      expect((await ui.find({ key: 'tool-server-start' }))?.text).toBe('Start Server')
+      await ui.unmount()
+    })
+
+    test('a server started elsewhere shows as running from what listens on its port', async ($, on) => {
+      const w = world(on, { [PROJECT]: JSON.stringify({ project: { tools: [{ type: 'server', label: 'Server', start: 'serve', port: 8000 }] } }) })
+      w.listener = 'LISTEN 0 511 127.0.0.1:8000 0.0.0.0:* users:(("node",pid=4321,fd=20))'
+      w.branch = 'feat/elsewhere'
+      await start($, on, { usd: 0 })
+      await clock.advance(3000)
+      expect(await rowText($)).toMatchObject({ 'tool-server-log': 'Running feat/elsewhere', 'tool-server-stop': 'Stop Server' })
+    })
+
+    test('/aitools project off hides the row everywhere, saved to the global file', async ($, on) => {
+      const w = world(on)
+      await start($, on, { usd: 0 })
+      const run = (args: string) => $.command.run({ command: 'aitools', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+      expect((await run('project off')).text).toMatch(/^Project row hidden/)
+      expect(await rowText($)).toEqual({})
+      expect(JSON.parse(w.files.get(GLOBAL) ?? '{}').bar.project).toBe(false)
+      expect((await run('project')).text).toBe('Project row shown.')
+      expect((await rowText($))['project-name']).toBe('vowelit')
+    })
+  })
+
+  describe('aitools.json', () => {
+    const GLOBAL = '/home/test/.claude/aitools.json'
+
+    function disk(on: On, files: Record<string, string> = {}) {
+      const map = new Map(Object.entries(files))
+      on('fs.exists', (_, e) => ({ value: map.has(e.path) }))
+      on('fs.read', (_, e) => ({ value: map.get(e.path) ?? '' }))
+      on('fs.write', (_, e) => {
+        map.set(e.path, e.text)
+        return { value: undefined }
+      })
+      const logs: string[] = []
+      on('ui.log', (_, e) => {
+        logs.push(e.text)
+        return { value: undefined }
+      })
+      return { map, logs }
+    }
+    const saved = (map: Map<string, string>) => JSON.parse(map.get(GLOBAL) ?? '{}')
+
+    test("a first run writes every setting, taking the store's over", async ($, on) => {
+      const { map } = disk(on)
+      await start($, on, { usd: 0 }, { settings: { label: false }, viewMode: 'task', agentTeam: 5 })
+      const file = saved(map)
+      expect(file.bar.show.label).toBe(false)
+      expect(file.bar.show.weekly).toBe(true)
+      expect(file.view).toBe('task')
+      expect(file.subagents.team).toBe(5)
+    })
+
+    test('the options write the global file only, keeping what else it holds', async ($, on) => {
+      const { map } = disk(on, { [GLOBAL]: JSON.stringify({ mine: 'kept', bar: { show: { label: true } } }) })
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'settings' })
+      await ui.press({ key: 'label' })
+      await ui.unmount()
+      expect(saved(map).bar.show.label).toBe(false)
+      expect(saved(map).mine).toBe('kept')
+      expect([...map.keys()]).toEqual([GLOBAL])
+    })
+
+    test('a hand edit takes effect within 30 seconds; a broken file leaves the settings as they were', async ($, on) => {
+      const { map, logs } = disk(on)
+      await start($, on, { usd: 0 })
+      expect(await barText($)).toContain('AI Tools')
+      map.set(GLOBAL, JSON.stringify({ ...saved(map), bar: { ...saved(map).bar, show: { ...saved(map).bar.show, label: false } } }))
+      await clock.advance(30_000)
+      expect(await barText($)).not.toContain('AI Tools')
+      map.set(GLOBAL, '{ "bar": ')
+      await clock.advance(30_000)
+      expect(await barText($)).not.toContain('AI Tools')
+      expect(logs.some(l => l.includes("isn't valid JSON"))).toBe(true)
     })
   })
 })

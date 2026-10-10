@@ -37,12 +37,36 @@ Press **⁝** to open the options above the bar, four to a row, and toggle any o
 leading the first row) the mascot, the title, 5-hour usage,
 weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, cold-cache cost,
 thread cost, last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
-Changes show in the bar right away and are saved across sessions. An option that is off does no work in the
+Changes show in the bar right away and are saved across sessions, in the settings file (below). An option that is off does no work in the
 background: the transcript scan runs only for monthly cost, thread tokens or thread cost %; the cost lookups only for
 the cost options; the mascot follows nothing while hidden. (Request times are kept either way: `/keepwarm` needs them.) Turned back on, an
 option catches up at once, except the burn-rate projection, which needs fresh samples (a few responses) to project
 from. Hiding the bar with `/aitools off` stops all of it. Press **⁝** again to close it; opening it closes the
 **🛠** menu, and the other way round.
+
+### The settings file
+
+Everything the mod's controls change is saved to `~/.claude/aitools.json` (`$CLAUDE_CONFIG_DIR/aitools.json` when
+that is set): the display options, `/aitools on|off`, `/aitools project on|off`, the view, and the Subagents pane's
+picks. The first run writes every setting into it, taking over what earlier versions kept in the mod's own store, so
+the file lists everything there is to change. Edit it by hand and the bar follows within 30 seconds, when **⁝** opens,
+or at once when Claude edits it. A file that isn't valid JSON is left alone: the settings stay as they were, and one
+dim line in the chat says what's wrong.
+
+```json
+{
+  "bar": {
+    "hidden": false,
+    "project": true,
+    "show": { "mascot": true, "label": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
+  },
+  "view": "off",
+  "subagents": { "team": "default", "helpers": "same", "showing": "all", "hideAfter": "never" }
+}
+```
+
+A write reads the file again first and changes only its own keys, so anything else in it stays. The mod never writes
+a project's own `.claude/aitools.json`; that one is yours (see [Project row](#project-row)).
 
 ## Mascot
 
@@ -296,6 +320,84 @@ files (Bash, Edit, Write, a subagent). GitHub (pull requests and CI, through the
 and every 5 minutes, two API calls each time, since its API limit is shared with everything else signed in as you.
 **Refresh**, right of **Prune worktrees**, reads git and GitHub now. Without `gh`, or signed out, CI shows – and the
 rest works. Closed, it reads nothing.
+
+## Project row
+
+In a GitHub repository a second row sits under the bar, for the project the session works in:
+
+```
+vowelit  Project  #42 Login fails on Safari                          ● Running feat/42-login  Stop Server  Docs
+```
+
+On the left, each opening in your browser:
+
+- **The repository's name**, from the main checkout's GitHub remote (`origin` first), opening the repository.
+- **Project**: the repository's GitHub Project board, when exactly one is linked to it. It's looked up once a day
+  through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
+  in the project file.
+- **The issue** the session is about: the first `#123` or `…/issues/123` in the session's first prompt (the context
+  Claude Code adds to it is left out), else a number the branch is named for: `feat/123-login`, `123-fix`,
+  `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
+  from GitHub, one call per issue, kept.
+
+Outside a GitHub repository there is no row. `/aitools project off` hides it in every project (saved to the settings
+file), and `/aitools project` shows it again.
+
+### The project file
+
+`<repo>/.claude/aitools.json` holds the row's settings and the tools on its right. Commit it to share the tools, or
+gitignore it; it's yours either way, and the mod never writes it. A worktree reads its own copy, else the main
+checkout's. Changes take effect within 30 seconds, or at once when Claude edits it.
+
+```json
+{
+  "project": {
+    "name": "Vowelit",
+    "board": "https://github.com/users/pkkid/projects/1/views/2",
+    "tools": [
+      {
+        "type": "server",
+        "label": "Server",
+        "start": ["{main}/tools/preview_worktree.sh", "{checkout}"],
+        "stop": ["node", "--input-type=module", "-e",
+                 "const {stopPreview} = await import(process.argv[1]); await stopPreview(process.argv[2])",
+                 "{main}/backend/tools/stop-preview.mjs", "{checkout}"],
+        "port": 8000,
+        "ready": "Local preview ready: (\\S+)"
+      },
+      { "type": "command", "label": "Test", "run": "npm test" },
+      { "type": "link", "label": "Docs", "url": "https://github.com/{repo}/wiki" }
+    ]
+  }
+}
+```
+
+| Key | What it does |
+|---|---|
+| `enabled` | `false` hides the row in this project |
+| `name` | The name shown on the left, in place of the repository's |
+| `board` | The Project board's URL (a view of it works too), or `false` for none; left out, the linked board is looked up |
+| `tools` | The tools on the right, in order |
+
+Each tool has a `type`, a `label`, and optionally an `id` (made from the label when left out). Commands are a list of
+arguments, run without a shell, or a string, run with `sh -c`, in the session's checkout unless `cwd` says otherwise.
+
+- **`link`**: a button that opens `url`.
+- **`command`**: a button that runs `run` and opens its log in a pane. A dot before it shows it running (yellow),
+  passed (green) or failed (red); pressing it while it runs shows its log.
+- **`server`**: a status that opens or closes its log, and a **Start**/**Stop** button. `start` runs as the mod's
+  own process. `ready`, a regular expression, marks it running once its output matches (its first group, the URL, is
+  kept); without one it counts as running as soon as it starts. `port` is read every 3 seconds, so a server started
+  anywhere else (another session, an editor, a terminal) shows as running, with its checkout's branch. `stop` runs to
+  stop it; without one, the mod ends its own process and whatever listens on the port. Reading the port uses `ss` and
+  `/proc`, so Linux only. A server the mod started ends when Claude Code does.
+
+Commands and links can name, in braces: `{checkout}` (this session's checkout), `{main}` (the main checkout),
+`{branch}`, `{repo}` (`owner/name`), `{owner}`, `{name}`, `{issue}` (the row's issue number, or empty) and `{port}`.
+
+Nothing in the file ever runs on its own: a command runs only when you press its button. The mod's own reads (git,
+the port, GitHub's board and issue title) are the only automatic work. A tool the mod can't use is left out, with a
+dim line in the chat saying why; the rest of the row still shows.
 
 ## How thread cost % is estimated
 
