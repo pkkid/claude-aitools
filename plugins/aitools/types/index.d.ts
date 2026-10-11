@@ -213,6 +213,42 @@ export type WorktreeAction =
   | { step: 'done'; text: string; isError: boolean }
   | null
 
+/** One item on the GitHub Project board: an issue, a pull request or a draft. */
+export type BoardItem = {
+  kind: 'issue' | 'pr' | 'draft'
+  /** Null for a draft. */
+  number: number | null
+  /** `owner/name` of the repository it lives in; null for a draft. */
+  repo: string | null
+  title: string
+  /** Null for a draft. */
+  url: string | null
+  /** GitHub's state of the issue or pull request; null for a draft. */
+  state: 'OPEN' | 'CLOSED' | 'MERGED' | null
+  /** The board's Status column it sits in; null when it has none. */
+  status: string | null
+  /** The pull request it links to: itself for one, else the one picked from those that close it. */
+  pr: { number: number; url: string } | null
+}
+
+/** What one read of the board found: its title and URL, its first items and how many it has in all. */
+export type BoardData = { title: string; url: string; total: number; items: BoardItem[] }
+
+/**
+ * The Project pane's contents: `source` is the board URL read, `at` when, and `error` why the read after it failed.
+ */
+export type BoardState =
+  | { status: 'none' }
+  | { status: 'loading' }
+  | { status: 'error'; text: string }
+  | { status: 'ready'; source: string; data: BoardData; at: number; error?: string }
+
+/** Which items the Project pane lists. */
+export type BoardFilter = 'open' | 'done' | 'all'
+
+/** The Project pane's Clawd: stacking blocks, asleep by a finished tower, or puzzled by a fallen one. */
+export type TowerMode = 'building' | 'resting' | 'puzzled'
+
 declare module 'claude-code' {
   interface PluginState {
     aitools: {
@@ -296,6 +332,14 @@ declare module 'claude-code' {
       worktrees: WorktreeList | null
       /** The pane's question, removal under way, or last result. */
       worktreeAction: WorktreeAction
+      /** Whether the Project pane is open, so a reload opens it again; the board is only read while it is. */
+      isBoardOpen: boolean
+      /** The Project pane's board items. */
+      board: BoardState
+      /** Which items the Project pane lists. */
+      boardFilter: BoardFilter
+      /** Whether a read of the board is under way: the pane's Refresh says so. */
+      isBoardReading: boolean
     }
   }
 }

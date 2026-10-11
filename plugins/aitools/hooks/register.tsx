@@ -24,6 +24,7 @@ import {
   workflowName,
 } from '../src/agentdock'
 import { CACHE_TTL, renderBar } from '../src/bar'
+import { BOARD_QUERY, BOARD_REFRESH_MS, PROJECT_PANE, parseBoardItems, parseBoardUrl, renderBoard } from '../src/board'
 import { price } from '../src/pricing'
 import {
   CHECKLIST_SPEC,
@@ -104,7 +105,7 @@ import type { PrFacts, Removal, WorktreeFacts } from '../src/worktrees'
 import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
+import type { BoardData, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
 import type { AgentKind, AgentShowing, Brief, HelperMode, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, TeamPick, TeamSize, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
@@ -154,6 +155,10 @@ const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
 const isWorktreesOpen = atom({ plugin: 'aitools', key: 'isWorktreesOpen' } as const, false)
 const worktrees = atom({ plugin: 'aitools', key: 'worktrees' } as const, null)
 const worktreeAction = atom({ plugin: 'aitools', key: 'worktreeAction' } as const, null)
+const isBoardOpen = atom({ plugin: 'aitools', key: 'isBoardOpen' } as const, false)
+const board = atom({ plugin: 'aitools', key: 'board' } as const, { status: 'loading' })
+const boardFilter = atom({ plugin: 'aitools', key: 'boardFilter' } as const, 'open')
+const isBoardReading = atom({ plugin: 'aitools', key: 'isBoardReading' } as const, false)
 
 const HANDOFF_PANE = 'handoff'
 const NOTES_PANE = 'notes'
@@ -217,6 +222,10 @@ let worktreeBase: string | null = null
 /** GitHub's word, as last read: pull requests by branch and CI by commit. Dropped when the pane closes. */
 let githubPrs = new Map<string, PrFacts[]>()
 let githubRuns = new Map<string, CiState>()
+/** The Project pane's next read of the board, BOARD_REFRESH_MS after the last; armed only while the pane is open. */
+let boardTimer: Timer | null = null
+/** The board read in flight: a read asked for meanwhile is dropped, since this one brings the same. */
+let boardReading: Promise<void> | null = null
 
 const encoder = new TextEncoder()
 const TICK_MS = 30_000
@@ -1041,6 +1050,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isAskable: await read($, isAskable),
     isKeepingWarm: (await read($, keepWarm)) !== null,
     viewMode: await read($, viewMode),
+    hasRepo: (await read($, githubRepo)) !== null,
     // Read only where it is drawn and turned on, so no other bar redraws for the mascot.
     mascot: el.Svg && current.mascot ? drawMascot(await read($, mascot)) : null,
   }
@@ -1060,6 +1070,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     setView: mode => void setView($, mode),
     openDock: () => void openDock($),
     openWorktrees: () => void openWorktrees($),
+    openProject: () => void openProject($),
     toggle: key => void toggleSetting($, key),
   }, list, projectRow)
 }
@@ -1619,6 +1630,15 @@ type BoardCache = Record<string, { at: number; url: string | null }>
  * scope; without it there is no board unless the file names one.
  */
 async function refreshBoard($: EngineInterface): Promise<void> {
+  const was = await read($, boardUrl)
+  await lookUpBoard($)
+  // A board changed while the Project pane shows the old one: the new one's items, from the store if fresh.
+  if ((await read($, boardUrl)) !== was && (await read($, isBoardOpen))) {
+    await loadBoardItems($, false)
+  }
+}
+
+async function lookUpBoard($: EngineInterface): Promise<void> {
   const repo = await read($, githubRepo)
   const config = await read($, projectConfig)
   if (repo === null || config?.board === false) {
@@ -1658,6 +1678,110 @@ async function refreshBoard($: EngineInterface): Promise<void> {
   const fresh = Object.fromEntries(Object.entries(cache).filter(([, v]) => now - v.at < BOARD_KEEP_MS))
   await $.store.set('boards', { ...fresh, [slugKey]: { at: now, url } })
   await update($, boardUrl, () => url)
+}
+
+// ---- The Project pane: the board's items ----
+
+/** How long a read of a board's items is kept in the store: past this it is dropped, whatever its board. */
+const BOARD_ITEMS_KEEP_MS = 24 * 60 * 60_000
+
+type BoardItemsCache = Record<string, { at: number; data: BoardData }>
+
+/** Sets the pane's one timer: its next read, `ms` from now. */
+function armBoardTimer($: EngineInterface, ms: number): void {
+  boardTimer?.cancel()
+  boardTimer = $.clock.after(Math.max(1000, ms), () => {
+    boardTimer = null
+    void loadBoardItems($, true)
+  })
+}
+
+function stopBoardTimer(): void {
+  boardTimer?.cancel()
+  boardTimer = null
+}
+
+/**
+ * Shows the board's items while the pane is open: the store's when a read of this board is under BOARD_REFRESH_MS
+ * old (unless `isForced`), else one GraphQL query through `gh`. Either way the next read is set for when this one
+ * turns BOARD_REFRESH_MS old, so the board is read at most that often.
+ */
+async function loadBoardItems($: EngineInterface, isForced: boolean): Promise<void> {
+  if (!(await read($, isBoardOpen)) || boardReading !== null) {
+    return
+  }
+  const url = await read($, boardUrl)
+  if (url === null) {
+    stopBoardTimer()
+    await update($, board, () => ({ status: 'none' as const }))
+    return
+  }
+  const target = parseBoardUrl(url)
+  if (target === null) {
+    stopBoardTimer()
+    await update($, board, () => ({ status: 'error' as const, text: `${url} isn't a github.com/users/… or github.com/orgs/… Project board` }))
+    return
+  }
+  const now = await $.clock.now()
+  const cache = ((await $.store.get('boardItems')) as BoardItemsCache | undefined) ?? {}
+  const kept = cache[url]
+  if (!isForced && kept !== undefined && now - kept.at < BOARD_REFRESH_MS) {
+    await update($, board, () => ({ status: 'ready' as const, source: url, data: kept.data, at: kept.at }))
+    armBoardTimer($, kept.at + BOARD_REFRESH_MS - now)
+    return
+  }
+  boardReading = readBoardItems($, url, target, cache, now).finally(() => {
+    boardReading = null
+  })
+  await boardReading
+}
+
+/** One read of the board: kept in the store and shown, or, when it fails, why beside what was shown before. */
+async function readBoardItems($: EngineInterface, url: string, target: { login: string; number: number }, cache: BoardItemsCache, now: number): Promise<void> {
+  await update($, isBoardReading, () => true)
+  await update($, board, shown => (shown.status === 'ready' && shown.source === url ? shown : { status: 'loading' as const }))
+  const cwd = (await read($, githubRepo))?.main ?? (await $.session.cwd())
+  const result = await $.process
+    .run(['gh', 'api', 'graphql', '-f', `query=${BOARD_QUERY}`, '-f', `login=${target.login}`, '-F', `number=${target.number}`], {
+      cwd,
+      env: { GH_PROMPT_DISABLED: '1' },
+      timeoutMs: 20_000,
+    })
+    .catch(() => null)
+  // gh prints GitHub's answer even when it carries errors, and exits 1; its own failures go to stderr.
+  const parsed = result === null ? { error: "gh isn't installed" } : result.stdout.trim() ? parseBoardItems(result.stdout) : { error: firstLine(result.stderr) || 'gh failed' }
+  if ('data' in parsed) {
+    const fresh = Object.fromEntries(Object.entries(cache).filter(([, v]) => now - v.at < BOARD_ITEMS_KEEP_MS))
+    await $.store.set('boardItems', { ...fresh, [url]: { at: now, data: parsed.data } })
+    await update($, board, () => ({ status: 'ready' as const, source: url, data: parsed.data, at: now }))
+  } else {
+    await update($, board, shown =>
+      shown.status === 'ready' && shown.source === url ? { ...shown, error: parsed.error } : { status: 'error' as const, text: parsed.error },
+    )
+  }
+  await update($, isBoardReading, () => false)
+  if (await read($, isBoardOpen)) {
+    armBoardTimer($, BOARD_REFRESH_MS)
+  }
+}
+
+/** Opens or closes the Project pane; opening shows the board's items, read now unless the last read is fresh. */
+async function setBoardOpen($: EngineInterface, isOpen: boolean): Promise<void> {
+  await update($, isBoardOpen, () => isOpen)
+  if (!isOpen) {
+    stopBoardTimer()
+    await $.ui.close({ id: PROJECT_PANE })
+    return
+  }
+  await update($, board, shown => (shown.status === 'ready' ? shown : { status: 'loading' as const }))
+  await $.ui.open({ id: PROJECT_PANE, title: 'Project' })
+  void loadBoardItems($, false)
+}
+
+/** The 🛠 menu's Project: opens the pane (its own close mark closes it), and closes the menu. */
+async function openProject($: EngineInterface): Promise<void> {
+  await update($, isToolsOpen, () => false)
+  await setBoardOpen($, true)
 }
 
 /** The issue the row links to: the one the first prompt names, else the one the branch is named for. */
@@ -2080,6 +2204,10 @@ export const register: Register = on => {
     if (await read($, isWorktreesOpen)) {
       await setWorktreesOpen($, true)
     }
+    // The Project pane too: it opens again, on the stored read while that is fresh.
+    if (await read($, isBoardOpen)) {
+      await setBoardOpen($, true)
+    }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     await $.command.register({ name: 'keepwarm', description: 'Keep the prompt cache warm while you are away (6h bare)', argumentHint: '[6h|90m|off|status|help]' })
     await $.command.register({
@@ -2401,6 +2529,28 @@ export const register: Register = on => {
     })
   })
 
+  on('ui.render', { component: 'Pane', requestId: PROJECT_PANE }, async ($, e) => {
+    // The 30-second tick keeps `updated 3m ago` current.
+    await read($, tick)
+    const repo = await read($, githubRepo)
+    const view = {
+      board: await read($, board),
+      filter: await read($, boardFilter),
+      isReading: await read($, isBoardReading),
+      repo: repo === null ? null : `${repo.owner}/${repo.name}`,
+      now: await $.clock.now(),
+    }
+    const el = $.ui.resolve(e)
+    // Clawd is SVG: the terminal never gets him, whatever its table holds.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+
+    return renderBoard({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, view, {
+      open: url => void openInBrowser($, url),
+      setFilter: filter => void update($, boardFilter, () => filter),
+      refresh: () => void loadBoardItems($, true),
+    })
+  })
+
   on('ui.render', { component: 'Pane', requestId: DOCK_PANE }, async ($, e) => {
     await read($, dockTick)
     // The 30-second tick keeps finished lines' `3m ago` current.
@@ -2475,6 +2625,10 @@ export const register: Register = on => {
     if (e.id === WORKTREES_PANE && e.origin.kind === 'person') {
       await update($, isWorktreesOpen, () => false)
       syncWorktrees($, false)
+    }
+    if (e.id === PROJECT_PANE && e.origin.kind === 'person') {
+      await update($, isBoardOpen, () => false)
+      stopBoardTimer()
     }
     if (e.id === DOCK_PANE && e.origin.kind === 'person') {
       await update($, isDockOpen, () => false)

@@ -263,6 +263,8 @@ export function renderBar(
     /** Whether /keepwarm is keeping the cache warm: the bar shows its marker. */
     isKeepingWarm: boolean
     viewMode: ViewMode
+    /** Whether the session works in a GitHub repository: the 🛠 menu offers its Project pane. */
+    hasRepo: boolean
     /** The mascot's drawing as it stands now. */
     mascot: { source: string; alt: string } | null
   },
@@ -274,6 +276,7 @@ export function renderBar(
     setView(mode: ViewMode): void
     openDock(): void
     openWorktrees(): void
+    openProject(): void
     toggleSettings(): void
     toggle(key: ToggleKey): void
   },
@@ -361,6 +364,7 @@ export function renderBar(
         <Button key="notes" label="Notes" {...QUIET} onPress={() => on.openNotes()} />
         <Button key="subagents" label="Subagents" {...QUIET} onPress={() => on.openDock()} />
         <Button key="worktrees" label="Worktrees" {...QUIET} onPress={() => on.openWorktrees()} />
+        {flags.hasRepo && <Button key="project" label="Project" {...QUIET} onPress={() => on.openProject()} />}
         {VIEWS.map(v => (
           <Button
             key={v.mode}
