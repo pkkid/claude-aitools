@@ -93,8 +93,8 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Worktrees**, **Task View**
-and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Worktrees**, **Project** (in a
+GitHub repository), **Task View** and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
 
@@ -398,6 +398,33 @@ Commands and links can name, in braces: `{checkout}` (this session's checkout), 
 Nothing in the file ever runs on its own: a command runs only when you press its button. The mod's own reads (git,
 the port, GitHub's board and issue title) are the only automatic work. A tool the mod can't use is left out, with a
 dim line in the chat saying why; the rest of the row still shows.
+
+## Project pane
+
+**Project** in the **🛠** menu opens a pane listing the items on the repository's GitHub Project board (the one the
+project row links to), in board order:
+
+```
+Vowelit  Open in GitHub  3 items · updated 2m ago                                    [Clawd]
+● Open 2  ○ Done 1  ○ All 3  Refresh
+
+#181  Lobby: Show who is ready before the round starts      ● In Progress  PR #183
+draft Idea: daily puzzle mode                               ○ Todo
+```
+
+- **Open in GitHub** opens the board. The note beside it counts the items and says how long since they were read.
+- **Open**, **Done** and **All** filter the list. An item is done when its Status column is Done (or Closed,
+  Complete…), or, with no Status, when its issue or pull request is closed.
+- Each line has the item's number (opening it; `name#12` for another repository's, `draft` for a draft), its title,
+  its Status and its pull request: the item itself when it is one, else the pull request that closes it (an open one
+  first, then a merged one).
+- Where SVG is drawn (the desktop), Clawd stacks task blocks top right; he sleeps by the finished tower when nothing is
+  open, and scratches his head at a fallen one when there is no board to read.
+
+The board is read with **one** GitHub API query (the first 100 items, through `gh`, which needs the `read:project`
+scope) when the pane opens, then every 5 minutes while it stays open. A read under 5 minutes old is kept, so closing
+and opening the pane again, or a reload, asks GitHub nothing. **Refresh** reads now and starts the 5 minutes over.
+Closed, it reads nothing. With no board linked, name one as `project.board` in `.claude/aitools.json`.
 
 ## How thread cost % is estimated
 

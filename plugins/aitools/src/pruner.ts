@@ -43,7 +43,7 @@ const dots = (pts: [number, number][], c: string) => pts.map(([x, y]) => rect(x,
 const down = (s: string) => `<g transform="translate(0 ${DROP})">${s}</g>`
 
 /** The frames in turn, each shown for its ms, over and over. */
-function cycle(frames: [string, number][]): string {
+export function cycle(frames: [string, number][]): string {
   const total = frames.reduce((n, [, d]) => n + d, 0)
   let at = 0
 

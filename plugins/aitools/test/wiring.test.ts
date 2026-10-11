@@ -1860,6 +1860,7 @@ describe('wiring', () => {
         if (cmd === 'git' && args[0] === 'rev-parse') return ok(args[1] === '--show-toplevel' ? '/r\n' : '/r/.git\n')
         if (cmd === 'git' && args[0] === 'remote') return ok(`origin\t${w.remote} (fetch)\norigin\t${w.remote} (push)\n`)
         if (cmd === 'git' && args[0] === 'branch') return ok(`${w.branch}\n`)
+        if (cmd === 'gh' && args[1] === 'graphql' && args.includes('login=pkkid')) return ok(JSON.stringify(BOARD_ANSWER))
         if (cmd === 'gh' && args[1] === 'graphql') return ok(JSON.stringify({ data: { repository: { projectsV2: { totalCount: 1, nodes: [{ url: 'https://github.com/users/pkkid/projects/1' }] } } } }))
         if (cmd === 'gh' && args[1]?.includes('/issues/')) return ok(`Issue ${args[1].split('/').at(-1)} title\n`)
         if (cmd === 'xdg-open') {
@@ -1887,6 +1888,26 @@ describe('wiring', () => {
       })
       on('ui.scroll', () => ({}))
       return w
+    }
+
+    /** The board's items as GitHub answers the Project pane's query: one in progress with a PR, one to do, one done. */
+    const BOARD_ANSWER = {
+      data: {
+        repositoryOwner: {
+          projectV2: {
+            title: 'Vowelit',
+            url: 'https://github.com/users/pkkid/projects/1',
+            items: {
+              totalCount: 3,
+              nodes: [
+                { type: 'ISSUE', status: { name: 'In Progress' }, content: { number: 181, title: 'Lobby: show who is ready', url: 'https://github.com/pkkid/vowelit/issues/181', state: 'OPEN', repository: { nameWithOwner: 'pkkid/vowelit' }, closedByPullRequestsReferences: { nodes: [{ number: 183, url: 'https://github.com/pkkid/vowelit/pull/183', state: 'OPEN' }] } } },
+                { type: 'DRAFT_ISSUE', status: { name: 'Todo' }, content: { title: 'Idea: daily puzzle' } },
+                { type: 'ISSUE', status: { name: 'Done' }, content: { number: 170, title: 'Admin page', url: 'https://github.com/pkkid/vowelit/issues/170', state: 'CLOSED', repository: { nameWithOwner: 'pkkid/vowelit' }, closedByPullRequestsReferences: { nodes: [] } } },
+              ],
+            },
+          },
+        },
+      },
     }
 
     const rowText = async ($: Engine) => {
@@ -1994,6 +2015,84 @@ describe('wiring', () => {
       expect(JSON.parse(w.files.get(GLOBAL) ?? '{}').bar.show.projectRow).toBe(false)
       expect((await run('project')).text).toBe('Project row shown.')
       expect((await rowText($))['project-name']).toBe('Vowelit')
+    })
+
+    describe('Project pane', () => {
+      const PP = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, requestId: 'project', props: { ...PANE, title: 'Project' } }
+      const reads = (w: World) => w.calls.filter(c => c.includes('login=pkkid')).length
+      const openPane = async ($: Engine) => {
+        const ui = await $.ui.mount(band())
+        await ui.press({ key: 'tools' })
+        await ui.press({ key: 'project' })
+        await ui.unmount()
+        await clock.settle()
+      }
+      const paneTexts = async ($: Engine) => {
+        const pane = await $.ui.mount(PP)
+        const texts = (await pane.findAll({})).map(n => n.text).filter((t): t is string => typeof t === 'string' && t !== '')
+        await pane.unmount()
+        return texts
+      }
+
+      test('the 🛠 menu opens it; one query shows the open items with their status and PR, and Clawd stacking', async ($, on) => {
+        const w = world(on)
+        const { opened } = await start($, on, { usd: 0 })
+        expect(reads(w)).toBe(0)
+        await openPane($)
+        expect(opened).toContain('project')
+        expect(reads(w)).toBe(1)
+        const pane = await $.ui.mount(PP)
+        const texts = (await pane.findAll({})).map(n => n.text).join('|')
+        expect(texts).toContain('Vowelit')
+        expect(texts).toContain('3 items · updated just now')
+        expect(texts).toContain('Lobby: show who is ready')
+        expect(texts).toContain('● In Progress')
+        expect(texts).toContain('Idea: daily puzzle')
+        expect(texts).not.toContain('Admin page')
+        expect((await pane.find({ key: 'filter-open' }))?.text).toBe('● Open 2')
+        expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd stacking task blocks')
+        await pane.press({ key: 'filter-done' })
+        await pane.press({ key: 'open' })
+        await clock.settle()
+        await pane.unmount()
+        expect((await paneTexts($)).join('|')).toContain('Admin page')
+        expect(w.opened).toEqual(['https://github.com/users/pkkid/projects/1'])
+      })
+
+      test('read every 5 minutes while open, from the store when opened again sooner; Refresh reads now', async ($, on) => {
+        const w = world(on)
+        await start($, on, { usd: 0 })
+        await openPane($)
+        expect(reads(w)).toBe(1)
+        await clock.advance(4 * 60_000 + 50_000)
+        expect(reads(w)).toBe(1)
+        await clock.advance(10_000)
+        expect(reads(w)).toBe(2)
+        // Opened again a minute after that read: the stored read shows, and the next is still due 5 minutes after it.
+        await clock.advance(60_000)
+        await openPane($)
+        expect(reads(w)).toBe(2)
+        await clock.advance(4 * 60_000)
+        expect(reads(w)).toBe(3)
+        const pane = await $.ui.mount(PP)
+        await pane.press({ key: 'refresh' })
+        await clock.settle()
+        await pane.unmount()
+        expect(reads(w)).toBe(4)
+        await clock.advance(4 * 60_000 + 50_000)
+        expect(reads(w)).toBe(4)
+        await clock.advance(10_000)
+        expect(reads(w)).toBe(5)
+      })
+
+      test('with no board it says how to name one, and asks GitHub nothing', async ($, on) => {
+        const w = world(on, { [PROJECT]: JSON.stringify({ project: { board: false } }) })
+        await start($, on, { usd: 0 })
+        await openPane($)
+        expect(reads(w)).toBe(0)
+        const texts = (await paneTexts($)).join('|')
+        expect(texts).toContain('This repository has no GitHub Project board')
+      })
     })
   })
 
