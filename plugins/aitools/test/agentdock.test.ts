@@ -8,7 +8,6 @@ import {
   headerText,
   isRunning,
   activityText,
-  clipLine,
   hideAfterLabel,
   visibleCards,
   isTeamPick,
@@ -105,16 +104,6 @@ describe('every subagent', () => {
     let run = addCard(addCard(newRun(0), 'h1', 'Helper', 0, 'helper'), 's1', 'Survey', 0, 'subagent')
     run = noteActivity(noteActivity(run, 'h1', 'Reading a'), 's1', 'Reading b')
     expect(run.cards.map(c => c.doing)).toEqual([undefined, 'Reading b'])
-  })
-
-  test("a line's name and activity are cut to 65 characters together, the name first", () => {
-    expect(clipLine('Survey', 'Reading bar.tsx')).toEqual({ task: 'Survey', doing: 'Reading bar.tsx' })
-    const line = clipLine('n'.repeat(30), 'd'.repeat(60))
-    expect(line).toEqual({ task: 'n'.repeat(30), doing: `${'d'.repeat(31)}…` })
-    expect(`${line.task} · ${line.doing}`).toHaveLength(65)
-    expect(clipLine('n'.repeat(90), 'Reading a')).toEqual({ task: `${'n'.repeat(64)}…` })
-    expect(clipLine('n'.repeat(53), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(53) })
-    expect(clipLine('n'.repeat(52), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(52), doing: 'Reading b…' })
   })
 
   test('running lines come first, oldest on top; finished ones follow, the latest first', () => {

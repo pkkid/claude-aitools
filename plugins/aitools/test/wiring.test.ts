@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import { SUBAGENT_NOTE } from '../src/agentdock'
 import { askmeText } from '../src/askme'
+import { NOTE_SHRINK } from '../src/format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from '../src/palette'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
@@ -1687,7 +1688,7 @@ describe('wiring', () => {
       await pane.press({ key: 'delete-/p/wt/wip' })
       const cells = await pane.findAll({ type: 'Box' })
       const widths = (key: string) => cells.filter(b => b.props.key === key).map(b => b.props.width)
-      for (const [key, width] of [['age', 5], ['changes', 15], ['ci', 3], ['delete', 3]] as const) {
+      for (const [key, width] of [['age', 5], ['added', 8], ['removed', 7], ['ci', 3], ['delete', 3]] as const) {
         expect(widths(key)).toEqual([width, width, width, width])
       }
       // The main checkout is the first row even though it is not the newest.
@@ -1696,16 +1697,22 @@ describe('wiring', () => {
       await pane.unmount()
     })
 
-    test("a row's name and note are cut to 50 characters together, the name first", async ($, on) => {
+    test("a row's name and note are drawn whole, for the layout to cut at the pane's edge, the note first", async ($, on) => {
       const repo = fakeRepo(on)
       repo.trees[3]!.branch = 'feat/a-very-long-branch-name-about-owl-mascot-guest-avatars'
       await start($, on, { usd: 0 })
       await run($, 'worktrees')
       await clock.settle()
-      const texts = (await (await $.ui.mount(WT)).findAll({ type: 'Text' })).map(t => t.text)
-      expect(texts).toContain('feat/a-very-long-branch-name-about-owl-mascot-gue…')
-      expect(texts).toContain('feat/dirty')
-      expect(texts).toContain(' · 2 changed files · merged')
+      const pane = await $.ui.mount(WT)
+      const texts = await pane.findAll({ type: 'Text' })
+      const long = texts.find(t => t.text.startsWith('feat/a-very-long-branch-name-about-owl-mascot-guest-avatars'))
+      expect(long?.props.wrap).toBe('truncate-end')
+      expect(texts.map(t => t.text)).toContain('feat/dirty')
+      const note = texts.find(t => t.text === ' · 2 changed files · merged')
+      expect(note?.props.wrap).toBe('truncate-end')
+      const boxes = await pane.findAll({ type: 'Box' })
+      expect(boxes.some(b => b.props.flexShrink === NOTE_SHRINK && b.props.minWidth === 0)).toBe(true)
+      await pane.unmount()
     })
 
     test("the 🛠 menu's Worktrees opens the pane; with none but the main checkout Clawd naps", async ($, on) => {

@@ -1,6 +1,7 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
 import type { CiState, Worktree, WorktreeAction, WorktreeList, WorktreePr, WorktreeTarget } from '../types'
+import { NOTE_SHRINK } from './format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
 import { PRUNER_HEIGHT, PRUNER_WIDTH, prunerAlt, prunerSvg } from './pruner'
 import type { PrunerMode } from './pruner'
@@ -274,31 +275,6 @@ export function worktreeNote(w: Worktree): string {
   return noteParts(w).join(' · ')
 }
 
-/** The fewest characters of room worth cutting a note's first part into; with less the note is left off. */
-const NOTE_MIN = 4
-
-/**
- * A row's name and note within `max` characters together, ` · ` between: the name first (cut with `…` past `max`),
- * then the note's parts that fit whole in what is left; when not even the first does, it is cut to the room.
- */
-export function rowText(w: Worktree, max = ROW_TEXT_MAX): { name: string; note: string } {
-  const clip = (text: string, n: number) => {
-    const chars = Array.from(text)
-    return chars.length > n ? `${chars.slice(0, n - 1).join('')}…` : text
-  }
-  const name = clip(worktreeName(w), max)
-  const room = max - Array.from(name).length - 3
-  const parts = noteParts(w)
-  const fit: string[] = []
-  for (const part of parts) {
-    if (Array.from([...fit, part].join(' · ')).length > room) break
-    fit.push(part)
-  }
-  const note = fit.length > 0 ? fit.join(' · ') : parts.length > 0 && room >= NOTE_MIN ? clip(parts[0]!, room) : ''
-
-  return { name, note }
-}
-
 /** The row's mark: ● blue where this session is, ● yellow with changes, ↑ yellow with unpushed commits, ○ else. */
 export function worktreeMark(w: Worktree): { text: string; color: string } {
   if (w.isCurrent) return { text: '●', color: BLUE }
@@ -485,11 +461,10 @@ function renderClean(
 /**
  * The right-hand columns' widths in cells: age, lines added and removed, CI, delete. Each sits in a box of its own
  * width, so the columns line up on every row whatever is in them: a desktop's native × button is wider than a cell,
- * and rows without one keep its room empty. Added and removed share one column, two cells apart, lined up on the right.
+ * and rows without one keep its room empty. Lines added and removed are a column each, lined up on the right, so every
+ * row's figures line up whatever the font.
  */
-export const COLUMNS = { age: 5, changes: 15, ci: 3, delete: 3 } as const
-/** The most characters a row's name and note take together, ` · ` included; the name has the room first. */
-export const ROW_TEXT_MAX = 50
+export const COLUMNS = { age: 5, added: 8, removed: 7, ci: 3, delete: 3 } as const
 
 /**
  * One worktree's row: its mark, name and faint note on the left; how long since its last commit, lines added and
@@ -508,7 +483,7 @@ function renderRow(
   const isBusy = view.action?.step === 'busy'
   const mark = worktreeMark(w)
   const ci = CI_MARKS[w.ci]
-  const line = rowText(w)
+  const note = worktreeNote(w)
   const nameColor = isCleanable(w) ? FAINT_TEXT : DOING_TEXT
   const ago = w.committedAt === null ? '' : age(view.now - w.committedAt)
   const ask = isAsking ? deleteText(w) : null
@@ -521,27 +496,25 @@ function renderRow(
   return (
     <Box key={`worktree-${w.path}`} flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" flexShrink={1}>
+        <Box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
           <Text color={mark.color}>{`${mark.text} `}</Text>
-          <Text color={nameColor} wrap="truncate-end">
-            {line.name}
-          </Text>
-          {line.note && (
-            <Text color={FAINT_TEXT} wrap="truncate-end">
-              {` · ${line.note}`}
+          <Box flexShrink={1} minWidth={0} overflow="hidden">
+            <Text color={nameColor} wrap="truncate-end">
+              {worktreeName(w)}
             </Text>
+          </Box>
+          {note && (
+            <Box flexShrink={NOTE_SHRINK} minWidth={0} overflow="hidden">
+              <Text color={FAINT_TEXT} wrap="truncate-end">
+                {` · ${note}`}
+              </Text>
+            </Box>
           )}
         </Box>
         <Box flexDirection="row" flexShrink={0}>
           {cell('age', COLUMNS.age, <Text color={FAINT_TEXT}>{ago}</Text>)}
-          {cell(
-            'changes',
-            COLUMNS.changes,
-            <Box flexDirection="row" columnGap={2}>
-              <Text color={GREEN}>{`+${w.added}`}</Text>
-              <Text color={RED}>{`−${w.removed}`}</Text>
-            </Box>,
-          )}
+          {cell('added', COLUMNS.added, <Text color={GREEN}>{`+${w.added}`}</Text>)}
+          {cell('removed', COLUMNS.removed, <Text color={RED}>{`−${w.removed}`}</Text>)}
           {cell('ci', COLUMNS.ci, <Text color={ci.color}>{ci.text}</Text>, 'center')}
           {cell(
             'delete',

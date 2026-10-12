@@ -213,7 +213,7 @@ workflow's agents have no names of their own). The ones running come first (olde
 most recently finished first; pieces waiting for a free helper get no line, only a count in the header. Marks are Task
 View's: a blue ● running, a ✓ done, and a red × failed. A running subagent's name is a lighter grey, followed in dim grey by what it is
 doing from its latest tool call (`Reading bar.tsx`, `Running npm test`) and its running time. A line's name and
-what it is doing take at most 65 characters together, cut with `…`. A finished line is all
+what it is doing take the room the pane's width leaves, cut with `…` at the edge. A finished line is all
 dim (but a failed one's ×): no bar, just how long it ran and how long ago it finished, `0:09 (3m ago)`.
 
 ```
@@ -290,7 +290,8 @@ commit.
 - **The name**: its branch, or its folder for a detached worktree (the desktop app makes those). After it, in dim
   grey, what it holds that Prune would keep (changed files, unpushed or unmerged commits), or `merged`, then its pull
   request and what it is (`main checkout`, `this session`, `detached`, `locked`, `folder missing`). The name and
-  these words take at most 50 characters together, the most telling words first; a merged worktree's name is dim too.
+  these words take the room the pane's width leaves, cut with `…` at the edge, the most telling words first; a merged
+  worktree's name is dim too.
 - **On the right**, in columns that line up on every row: how long since its last commit (`12m`, `5h`, `2d`), lines
   added and removed since it left the base branch (uncommitted work included), CI, and ×.
 - **CI**: ✓ passed, × failed, ● still running, – none found. It is its pull request's checks at its commit, else the

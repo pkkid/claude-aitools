@@ -316,11 +316,13 @@ function renderRows(el: El, items: readonly BoardItem[], view: BoardView, on: Bo
 
     return (
       <Box key={`item-${url ?? `draft-${i}`}`} flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" flexShrink={1}>
+        <Box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
           {cell('id', idWidth, url === null ? <Text color={FAINT_TEXT}>{id}</Text> : <Button key={`id-${i}`} label={id} {...QUIET} onPress={() => on.open(url)} />)}
-          <Text color={isDone(item) ? FAINT_TEXT : DOING_TEXT} wrap="truncate-end">
-            {item.title}
-          </Text>
+          <Box flexShrink={1} minWidth={0} overflow="hidden">
+            <Text color={isDone(item) ? FAINT_TEXT : DOING_TEXT} wrap="truncate-end">
+              {item.title}
+            </Text>
+          </Box>
         </Box>
         <Box flexDirection="row" flexShrink={0} marginLeft={2}>
           {cell('status', statusWidth, <Text color={statusMark(item.status).color}>{statusText(item.status)}</Text>)}

@@ -68,3 +68,10 @@ export function elapsed(ms: number): string {
 
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
 }
+
+/**
+ * How much faster a pane row's faint note shrinks than the name before it (both CSS and Yoga shrink by flexShrink
+ * times width), so the layout cuts the note first and the name only once the note is gone. They are separate Texts in
+ * boxes of their own: the desktop wraps a Text with another nested in it rather than cutting it.
+ */
+export const NOTE_SHRINK = 1000
