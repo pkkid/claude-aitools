@@ -2,7 +2,7 @@ import type { Elements } from 'claude-code'
 
 import type { AgentCard, AgentKind, AgentRun, AgentShowing, HelperMode, HideAfter, TeamPick, TeamSize } from '../types'
 import { progressBar } from './checklist'
-import { ago, elapsed } from './format'
+import { NOTE_SHRINK, ago, elapsed } from './format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, RED, YELLOW } from './palette'
 import { TOTEM_HEIGHT, TOTEM_WIDTH, totemAlt, totemSvg } from './totem'
 
@@ -171,29 +171,6 @@ export function workflowName(input: Record<string, unknown>): string {
   const script = typeof input.script === 'string' ? input.script : ''
 
   return /\bname\s*:\s*['"`]([^'"`]+)['"`]/.exec(script)?.[1] ?? 'workflow'
-}
-
-/** The most characters a line's name and activity take together, ` · ` included. */
-export const LINE_MAX = 65
-/** The fewest characters worth showing of an activity; with less room it is left off. */
-const DOING_MIN = 10
-
-/**
- * A line's name and activity cut to `max` characters together, the cut marked with `…`: the name first, then the
- * activity in what is left; an activity with under DOING_MIN characters of room is left off.
- */
-export function clipLine(task: string, doing?: string, max = LINE_MAX): { task: string; doing?: string } {
-  const clip = (text: string, n: number) => {
-    const chars = Array.from(text)
-    return chars.length > n ? `${chars.slice(0, n - 1).join('')}…` : text
-  }
-  const name = clip(task, max)
-  const room = max - Array.from(name).length - 3
-  if (!doing || room < DOING_MIN) {
-    return { task: name }
-  }
-
-  return { task: name, doing: clip(doing, room) }
 }
 
 /** The run with a refused piece waiting for a free helper (once per description). */
@@ -414,11 +391,13 @@ function renderCard(el: El, card: AgentCard, now: number) {
   if (card.status !== 'running') {
     return (
       <Box key={`agent-${card.id}`} flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" flexShrink={1}>
+        <Box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
           <Text color={card.status === 'failed' ? RED : FAINT_TEXT}>{`${CARD_MARKS[card.status]} `}</Text>
-          <Text color={FAINT_TEXT} wrap="truncate-end">
-            {clipLine(card.task).task}
-          </Text>
+          <Box flexShrink={1} minWidth={0} overflow="hidden">
+            <Text color={FAINT_TEXT} wrap="truncate-end">
+              {card.task}
+            </Text>
+          </Box>
         </Box>
         <Text color={FAINT_TEXT}>{` ${time} (${ago(now - (card.endedAt ?? now))})`}</Text>
       </Box>
@@ -427,19 +406,22 @@ function renderCard(el: El, card: AgentCard, now: number) {
   const percent = card.percent ?? 0
   const bar = progressBar(percent)
   const isMeasured = (card.kind ?? 'helper') === 'helper' || card.percent !== undefined
-  const line = clipLine(card.task, card.doing)
 
   return (
     <Box key={`agent-${card.id}`} flexDirection="row" justifyContent="space-between">
-      <Box flexDirection="row" flexShrink={1}>
+      <Box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
         <Text color={BLUE}>{`${CARD_MARKS.running} `}</Text>
-        <Text color={DOING_TEXT} wrap="truncate-end">
-          {line.task}
-        </Text>
-        {line.doing && (
-          <Text color={FAINT_TEXT} wrap="truncate-end">
-            {` · ${line.doing}`}
+        <Box flexShrink={1} minWidth={0} overflow="hidden">
+          <Text color={DOING_TEXT} wrap="truncate-end">
+            {card.task}
           </Text>
+        </Box>
+        {card.doing && (
+          <Box flexShrink={NOTE_SHRINK} minWidth={0} overflow="hidden">
+            <Text color={FAINT_TEXT} wrap="truncate-end">
+              {` · ${card.doing}`}
+            </Text>
+          </Box>
         )}
       </Box>
       <Box flexDirection="row" flexShrink={0}>

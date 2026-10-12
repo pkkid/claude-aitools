@@ -16,9 +16,9 @@ import {
   parseWorktreeList,
   prunerMode,
   removedText,
-  rowText,
   sortWorktrees,
   toWorktree,
+  worktreeName,
   worktreeNote,
 } from '../src/worktrees'
 import type { WorktreeFacts } from '../src/worktrees'
@@ -189,14 +189,11 @@ describe('worktrees: rows', () => {
     expect(worktreeNote({ ...tree({ ahead: 2 }), isMerged: true })).toBe('merged')
   })
 
-  test("a long name keeps the note's first parts whole, or the first cut to the room", () => {
+  test("a detached worktree's note: merged, its pull request, detached", () => {
     const prs = parsePrs(JSON.stringify([{ number: 171, url: 'u', state: 'MERGED', headRefName: 'f', headRefOid: 'bbb', statusCheckRollup: [] }]))
     const at = (path: string) => ({ ...toWorktree(facts({ branch: null }), prs, new Map()), path })
-    expect(rowText(at('/r/history-view-challenge-finisher-4cc506'))).toEqual({ name: 'history-view-challenge-finisher-4cc506', note: 'merged' })
-    expect(rowText(at('/r/challenge-view-display-fields-2bcfa1'))).toEqual({ name: 'challenge-view-display-fields-2bcfa1', note: 'merged' })
-    expect(rowText(at('/r/owl'))).toEqual({ name: 'owl', note: 'merged · PR #171 · detached' })
-    expect(rowText({ ...tree({ changedFiles: 12 }), branch: 'x'.repeat(40) }).note).toBe('12 cha…')
-    expect(rowText({ ...tree(), branch: 'x'.repeat(60) })).toEqual({ name: `${'x'.repeat(49)}…`, note: '' })
+    expect(worktreeName(at('/r/owl'))).toBe('owl')
+    expect(worktreeNote(at('/r/owl'))).toBe('merged · PR #171 · detached')
   })
 
   test('ages in their largest unit', () => {
