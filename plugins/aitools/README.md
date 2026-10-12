@@ -134,7 +134,7 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Background tasks**, **Worktrees**, **Project** (in a
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Tasks**, **Worktrees**, **Project** (in a
 GitHub repository), **Task View** and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
@@ -241,7 +241,7 @@ request finishes.
 ## Background tasks
 
 While any background task runs, the [project row](#project-row) counts them right of the project's name (`1 task`,
-`3 tasks`); pressing it opens the Background tasks pane. **Background tasks** in the **🛠** menu opens it too (where
+`3 tasks`); pressing it opens the Background tasks pane. **Tasks** in the **🛠** menu opens it too (where
 there is no project row), and `/tasks` opens it, or closes it if open; the pane's own close mark closes it. It stays
 open until you close it, and comes back after the mod reloads.
 

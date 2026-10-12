@@ -645,15 +645,15 @@ describe('wiring', () => {
       expect(panes.open.has('tasks')).toBe(false)
     })
 
-    test('the 🛠 menu\'s Background tasks only opens the pane, with no circle', async ($, on) => {
+    test('the 🛠 menu\'s Tasks only opens the pane, with no circle', async ($, on) => {
       const panes = await start($, on, { usd: 0 })
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'tasks' }))?.text).toBe('Background tasks')
+      expect((await ui.find({ key: 'tasks' }))?.text).toBe('Tasks')
       await ui.press({ key: 'tasks' })
       expect(panes.open.has('tasks')).toBe(true)
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'tasks' }))?.text).toBe('Background tasks')
+      expect((await ui.find({ key: 'tasks' }))?.text).toBe('Tasks')
       await ui.press({ key: 'tasks' })
       await ui.unmount()
       expect(panes.open.has('tasks')).toBe(true)

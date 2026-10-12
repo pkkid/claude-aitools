@@ -322,7 +322,7 @@ export function renderBar(
           onPress={() => isHandoffIdle && on.handoff()}
         />
         <Button key="notes" label="Notes" {...QUIET} onPress={() => on.openNotes()} />
-        <Button key="tasks" label="Background tasks" {...QUIET} onPress={() => on.openDock()} />
+        <Button key="tasks" label="Tasks" {...QUIET} onPress={() => on.openDock()} />
         <Button key="worktrees" label="Worktrees" {...QUIET} onPress={() => on.openWorktrees()} />
         {flags.hasRepo && <Button key="project" label="Project" {...QUIET} onPress={() => on.openProject()} />}
         {VIEWS.map(v => (

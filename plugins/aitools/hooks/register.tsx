@@ -602,7 +602,7 @@ async function toggleDock($: EngineInterface): Promise<boolean> {
   return isOpen
 }
 
-/** The 🛠 menu's Background tasks: opens the pane (its own close mark closes it), and closes the menu. */
+/** The 🛠 menu's Tasks: opens the Background tasks pane (its own close mark closes it), and closes the menu. */
 async function openDock($: EngineInterface): Promise<void> {
   await update($, isToolsOpen, () => false)
   await setDockOpen($, true)
