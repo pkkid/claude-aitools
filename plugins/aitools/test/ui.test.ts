@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { DOING_TEXT } from '../src/palette'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
@@ -116,7 +117,7 @@ describe('AbovePrompt band', () => {
     const label = texts.find(t => t.text === 'month ')
     const value = texts.find(t => t.text.startsWith('…'))
     expect(label?.props.dimColor).toBe(true)
-    expect(value?.props.color).toBe('#b0b0b0')
+    expect(value?.props.color).toBe(DOING_TEXT)
     expect(value?.props.dimColor).toBeUndefined()
   })
 

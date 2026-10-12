@@ -3,16 +3,17 @@
  * stray branch off it with shears while the project has worktrees, sweeps up with a broom while some are being
  * removed, and naps under it, all in grey, when there are none but the main checkout.
  *
- * The totem's grid (24 x 26 pixels at 2.5 screen pixels each, 60 x 65 px): Clawd is the bar's mascot moved down DROP
- * rows to stand on the bottom one, the tree to his right.
+ * The totem's grid (24 x 26 pixels, three text rows tall): Clawd is the bar's mascot moved down DROP rows to stand
+ * on the bottom one, the tree to his right.
  */
 
-import { O, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
+import { O, PANE_PICTURE_HEIGHT, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
 
 const LEFT = 3
 const W = 24
 const H = 26
-const SCALE = 2.5
+/** Screen pixels per grid pixel: the grid fills PANE_PICTURE_HEIGHT. */
+const SCALE = PANE_PICTURE_HEIGHT / H
 /** How far Clawd's frame moves down to stand on the bottom row. */
 const DROP = 14
 
@@ -32,8 +33,8 @@ const ASLEEP_BARK = '#4A4A47'
 const ASLEEP_LEAF = '#6E6E6A'
 
 /** CSS pixels the picture takes in the pane. */
-export const PRUNER_WIDTH = W * SCALE
-export const PRUNER_HEIGHT = H * SCALE
+export const PRUNER_WIDTH = Math.round(W * SCALE)
+export const PRUNER_HEIGHT = PANE_PICTURE_HEIGHT
 
 /** What Clawd is doing: snipping while there are worktrees, sweeping while some are removed, napping with none. */
 export type PrunerMode = 'pruning' | 'sweeping' | 'napping'

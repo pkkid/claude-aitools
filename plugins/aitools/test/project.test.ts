@@ -13,6 +13,7 @@ import {
   serverStatus,
   splitOutput,
 } from '../src/project'
+import { GREEN, RED, YELLOW } from '../src/palette'
 
 describe('parseGithubRemote', () => {
   test('HTTPS, SSH and ssh:// forms, with or without .git', () => {
@@ -133,22 +134,22 @@ describe('projectFrom', () => {
 describe('tool status', () => {
   test("a server's words and dot by its phase, or by what listens on its port", () => {
     expect(serverStatus(undefined, null)).toEqual({ dot: '○', text: 'Stopped' })
-    expect(serverStatus({ phase: 'starting', branch: 'feat/x', detail: '' }, null)).toEqual({ dot: '○', text: 'Starting feat/x…', color: 'yellow' })
-    expect(serverStatus({ phase: 'ready', branch: 'feat/x', detail: 'http://x' }, null)).toEqual({ dot: '●', text: 'Running feat/x', color: 'green' })
-    expect(serverStatus(undefined, { checkout: '/w', label: 'main', pid: 1 })).toEqual({ dot: '●', text: 'Running main', color: 'green' })
-    expect(serverStatus({ phase: 'exited', branch: '', detail: 'code 1' }, null)).toEqual({ dot: '○', text: 'Exited (code 1)', color: 'red' })
+    expect(serverStatus({ phase: 'starting', branch: 'feat/x', detail: '' }, null)).toEqual({ dot: '○', text: 'Starting feat/x…', color: YELLOW })
+    expect(serverStatus({ phase: 'ready', branch: 'feat/x', detail: 'http://x' }, null)).toEqual({ dot: '●', text: 'Running feat/x', color: GREEN })
+    expect(serverStatus(undefined, { checkout: '/w', label: 'main', pid: 1 })).toEqual({ dot: '●', text: 'Running main', color: GREEN })
+    expect(serverStatus({ phase: 'exited', branch: '', detail: 'code 1' }, null)).toEqual({ dot: '○', text: 'Exited (code 1)', color: RED })
     expect(serverStatus({ phase: 'exited', branch: '', detail: 'code 0' }, null)).toEqual({ dot: '○', text: 'Exited (code 0)' })
     expect(serverStatus({ phase: 'exited', branch: '', detail: 'SIGTERM' }, null)).toEqual({ dot: '○', text: 'Exited (SIGTERM)' })
-    expect(serverStatus({ phase: 'exited', branch: '', detail: 'SIGKILL' }, null).color).toBe('red')
+    expect(serverStatus({ phase: 'exited', branch: '', detail: 'SIGKILL' }, null).color).toBe(RED)
     expect(isServerUp(undefined, { checkout: '', label: 'x', pid: null })).toBe(true)
     expect(isServerUp({ phase: 'exited', branch: '', detail: '' }, null)).toBe(false)
   })
 
   test("a command's dot: none before it ran, yellow running, then green or red", () => {
     expect(commandDot(undefined)).toBeNull()
-    expect(commandDot({ phase: 'running', branch: '', detail: '' })?.color).toBe('yellow')
-    expect(commandDot({ phase: 'passed', branch: '', detail: '' })?.color).toBe('green')
-    expect(commandDot({ phase: 'failed', branch: '', detail: '' })?.color).toBe('red')
+    expect(commandDot({ phase: 'running', branch: '', detail: '' })?.color).toBe(YELLOW)
+    expect(commandDot({ phase: 'passed', branch: '', detail: '' })?.color).toBe(GREEN)
+    expect(commandDot({ phase: 'failed', branch: '', detail: '' })?.color).toBe(RED)
   })
 
   test("the issue's label: its number, then its title cut to fit", () => {

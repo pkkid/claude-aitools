@@ -1,7 +1,7 @@
 import type { Elements, RenderChildren } from 'claude-code'
 
 import type { CiState, Worktree, WorktreeAction, WorktreeList, WorktreePr, WorktreeTarget } from '../types'
-import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from './checklist'
+import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
 import { PRUNER_HEIGHT, PRUNER_WIDTH, prunerAlt, prunerSvg } from './pruner'
 import type { PrunerMode } from './pruner'
 
@@ -302,8 +302,8 @@ export function rowText(w: Worktree, max = ROW_TEXT_MAX): { name: string; note: 
 /** The row's mark: ● blue where this session is, ● yellow with changes, ↑ yellow with unpushed commits, ○ else. */
 export function worktreeMark(w: Worktree): { text: string; color: string } {
   if (w.isCurrent) return { text: '●', color: BLUE }
-  if (w.changedFiles > 0) return { text: '●', color: 'yellow' }
-  if (w.unpushed > 0 && !w.isMerged) return { text: '↑', color: 'yellow' }
+  if (w.changedFiles > 0) return { text: '●', color: YELLOW }
+  if (w.unpushed > 0 && !w.isMerged) return { text: '↑', color: YELLOW }
 
   return { text: '○', color: FAINT_TEXT }
 }
@@ -311,8 +311,8 @@ export function worktreeMark(w: Worktree): { text: string; color: string } {
 /** CI's mark: ✓ passed, × failed, ● running, – none. */
 export const CI_MARKS: Record<CiState, { text: string; color: string }> = {
   pass: { text: '✓', color: GREEN },
-  fail: { text: '×', color: 'red' },
-  running: { text: '●', color: 'yellow' },
+  fail: { text: '×', color: RED },
+  running: { text: '●', color: YELLOW },
   none: { text: '–', color: FAINT_TEXT },
 }
 
@@ -412,7 +412,7 @@ export function renderWorktrees(
     lines = [
       <Text key="header" dimColor>{headerText(rows)}</Text>,
       action?.step === 'done' ? (
-        <Text key="note" color={action.isError ? 'red' : FAINT_TEXT}>{action.text}</Text>
+        <Text key="note" color={action.isError ? RED : FAINT_TEXT}>{action.text}</Text>
       ) : (
         <Text key="note" color={FAINT_TEXT}>{cleanText(rows, list.base)}</Text>
       ),
@@ -539,7 +539,7 @@ function renderRow(
             COLUMNS.changes,
             <Box flexDirection="row" columnGap={2}>
               <Text color={GREEN}>{`+${w.added}`}</Text>
-              <Text color="red">{`−${w.removed}`}</Text>
+              <Text color={RED}>{`−${w.removed}`}</Text>
             </Box>,
           )}
           {cell('ci', COLUMNS.ci, <Text color={ci.color}>{ci.text}</Text>, 'center')}
@@ -556,7 +556,7 @@ function renderRow(
       {ask && (
         <Box flexDirection="column" alignItems="flex-end">
           <Box flexDirection="row" columnGap={1}>
-            <Text color="yellow">{ask.question}</Text>
+            <Text color={YELLOW}>{ask.question}</Text>
             <Button key={`delete-yes-${w.path}`} label="Yes" plain dimColor={false} onPress={() => on.confirm()} />
             <Button key={`delete-no-${w.path}`} label="No" plain dimColor onPress={() => on.cancel()} />
           </Box>

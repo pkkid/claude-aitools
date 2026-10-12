@@ -2,18 +2,18 @@
  * The Subagents pane's picture on surfaces that draw SVG (the desktop Code tab): Clawd with a mini Clawd stacked on
  * his head for each subagent running, asleep when none is.
  *
- * A 24 x 26 pixel grid at 2.5 screen pixels per grid pixel (60 x 65 px), a little shorter than the pane's four option
- * rows.
+ * A 24 x 26 pixel grid scaled to PANE_PICTURE_HEIGHT, three text rows tall, as every pane picture is.
  * Clawd is the bar's mascot moved down DROP rows to stand on the bottom one; each mini Clawd is a 9 x 3 body on four
  * 1-pixel legs, standing on the head of the one below.
  */
 
-import { D, O, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
+import { D, O, PANE_PICTURE_HEIGHT, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
 
 const LEFT = 3
 const W = 24
 const H = 26
-const SCALE = 2.5
+/** Screen pixels per grid pixel: the grid fills PANE_PICTURE_HEIGHT. */
+const SCALE = PANE_PICTURE_HEIGHT / H
 /** How far Clawd's frame moves down to stand on the bottom row. */
 const DROP = 14
 /** The top of Clawd's body, where the stack starts. */
@@ -25,8 +25,8 @@ const MINI_X = 9
 const ASLEEP = '#5C5C58'
 
 /** CSS pixels the picture takes in the pane. */
-export const TOTEM_WIDTH = W * SCALE
-export const TOTEM_HEIGHT = H * SCALE
+export const TOTEM_WIDTH = Math.round(W * SCALE)
+export const TOTEM_HEIGHT = PANE_PICTURE_HEIGHT
 /** Mini Clawds the stack shows at most; with more running it stays full. */
 export const TOTEM_MAX = 4
 

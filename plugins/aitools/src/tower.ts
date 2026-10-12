@@ -3,18 +3,19 @@
  * Blocks drop in and stack while the board has open items, and he throws his arms up as the last lands; with nothing
  * open he sleeps by the finished tower, all in grey; with no board to read he scratches his head at a fallen block.
  *
- * The pruner's grid (24 x 26 pixels at 2.5 screen pixels each, 60 x 65 px): Clawd is the bar's mascot moved down DROP
- * rows to stand on the bottom one, the tower to his right.
+ * The pruner's grid (24 x 26 pixels, three text rows tall): Clawd is the bar's mascot moved down DROP rows to stand
+ * on the bottom one, the tower to his right.
  */
 
-import { O, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
+import { O, PANE_PICTURE_HEIGHT, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
 import { cycle } from './pruner'
 import type { TowerMode } from '../types'
 
 const LEFT = 3
 const W = 24
 const H = 26
-const SCALE = 2.5
+/** Screen pixels per grid pixel: the grid fills PANE_PICTURE_HEIGHT. */
+const SCALE = PANE_PICTURE_HEIGHT / H
 /** How far Clawd's frame moves down to stand on the bottom row. */
 const DROP = 14
 
@@ -29,8 +30,8 @@ const ASLEEP_EDGE = '#4A4A47'
 const ROUND = 4000
 
 /** CSS pixels the picture takes in the pane. */
-export const TOWER_WIDTH = W * SCALE
-export const TOWER_HEIGHT = H * SCALE
+export const TOWER_WIDTH = Math.round(W * SCALE)
+export const TOWER_HEIGHT = PANE_PICTURE_HEIGHT
 
 const ms = (n: number) => `${Math.round(n)}ms`
 const dots = (pts: [number, number][], c: string) => pts.map(([x, y]) => rect(x, y, 1, 1, c)).join('')

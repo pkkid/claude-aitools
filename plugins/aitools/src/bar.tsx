@@ -3,9 +3,10 @@ import type { Elements, RenderChildren } from 'claude-code'
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
 import { coldCacheUsd } from './pricing'
 import { usdSince } from './transcripts'
-import { DOING_TEXT, VIEW_NAMES } from './checklist'
+import { VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
 import { MASCOT_HEIGHT, MASCOT_WIDTH } from './mascot'
+import { DOING_TEXT, RED, YELLOW } from './palette'
 import { TOGGLES } from './settings'
 import type { MonthTotal, Settings, Snapshot, ToggleKey, ViewMode } from '../types'
 
@@ -39,7 +40,7 @@ export const KEEPWARM_MARK = '\u263C'
 const DASH = '—'
 const MIN = 60_000
 const CACHE_WARN = 10 * MIN
-const TONE_COLORS = { warn: 'yellow', danger: 'red' } as const
+const TONE_COLORS = { warn: YELLOW, danger: RED } as const
 /** Values in the checklist's half-dim grey: brighter than their dim labels, quieter than full text. */
 const VALUE_COLOR = DOING_TEXT
 
