@@ -1,5 +1,5 @@
 node_modules/
-.claude/types/
-.claude/notes.md
+# Local Claude Code files: settings, notes, the generated plugin types, the mod's project file.
+.claude/
 *.log
 plugins/*/tsconfig.json
