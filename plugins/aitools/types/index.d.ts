@@ -52,45 +52,35 @@ export type ChecklistItem = { text: string; status: 'todo' | 'doing' | 'done'; p
 /** The plan the model last reported through the checklist tool. */
 export type Checklist = { title: string; items: ChecklistItem[] }
 
-/** How many helper agents the Subagents pane lets run at once. */
-export type TeamSize = 3 | 5 | 8 | 10 | 20
+/** Which background tasks the pane lists: all of them, or only those of one kind. */
+export type AgentShowing = 'all' | AgentKind
 
-/** The team picked in the Subagents pane: a size, or Default, which leaves subagents as Claude Code runs them. */
-export type TeamPick = TeamSize | 'default'
-
-/** Fast & Cheap helpers run on a smaller, quicker setup; Same as chat on the chat's model and effort. */
-export type HelperMode = 'fast' | 'same'
+/** How long a finished task's line stays, in minutes: 0 hides it as soon as it finishes, `never` keeps it. */
+export type HideAfter = 0 | 5 | 15 | 60 | 'never'
 
 /**
- * Which subagents the pane lists: all of them, only those Claude started with its Agent tool (no workflow agents), or
- * only those started since the person's last prompt.
+ * What a background task is: a subagent Claude started, one of a workflow's agents (named for its workflow,
+ * numbered), a shell command running in the background, or a monitor watching a command's output.
  */
-export type AgentShowing = 'all' | 'tool' | 'current'
+export type AgentKind = 'subagent' | 'workflow' | 'command' | 'monitor'
 
-/** How long a finished subagent's line stays, in minutes: 0 hides it as soon as it finishes, `never` keeps it. */
-export type HideAfter = 0 | 1 | 5 | 15 | 'never'
-
-/**
- * Who a subagent line is for: a helper the team started (it reports its own progress), any other subagent, or one of
- * a workflow's agents (no name of its own: its workflow's, numbered).
- */
-export type AgentKind = 'helper' | 'subagent' | 'workflow'
-
-/** One subagent's line in the Subagents pane. */
+/** One background task's line in the Background tasks pane. */
 export type AgentCard = {
   id: string
   task: string
-  /** Absent on lines from before kinds existed: those were all helpers. */
-  kind?: AgentKind
+  kind: AgentKind
   doing?: string
   percent?: number
-  status: 'running' | 'done' | 'failed'
+  /** Stopped: killed by the person or by Claude, or its time limit reached. */
+  status: 'running' | 'done' | 'failed' | 'stopped'
   startedAt: number
   endedAt?: number
+  /** A monitor's deadline, when it has one: it ends then if no notice says so sooner. */
+  expiresAt?: number
 }
 
-/** The subagents seen since the person's last request, and pieces waiting for a free helper. */
-export type AgentRun = { startedAt: number; cards: AgentCard[]; queued: string[] }
+/** The background tasks seen this session. */
+export type AgentRun = { startedAt: number; cards: AgentCard[] }
 
 /** What the mascot is doing; Celebrating, Oops and Waving play for a moment and give way. */
 export type MascotPose = 'idle' | 'working' | 'reading' | 'puzzled' | 'sleeping' | 'celebrate' | 'error' | 'wave'
@@ -286,19 +276,14 @@ declare module 'claude-code' {
       isNotesOpen: boolean
       /** The note as read when the pane opened: the editor keeps its own text after that. */
       notes: NotesFile
-      /** The dock's team size and helper model; mirrored in $.store. */
-      team: TeamPick
-      helpers: HelperMode
-      /** The pane's Showing and Hide completed picks; mirrored in $.store. */
+      /** The pane's Showing and Hide after picks; mirrored in $.store. */
       agentShowing: AgentShowing
       hideAfter: HideAfter
-      /** When the person last sent a prompt while the pane was open: where Current task agents start. */
-      requestAt: number | null
-      /** The helpers of the current request; reset when the person sends a new one. */
+      /** The background tasks seen this session, finished ones included. */
       agentRun: AgentRun | null
-      /** The chat's reasoning effort, as its last request sent it: what Same as chat helpers use. */
-      mainEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number | null
-      /** Bumped every second while helpers run, so their times redraw. */
+      /** How many of them are running: what the project row's button shows. */
+      runningTasks: number
+      /** Bumped every second while subagents run, so their times redraw. */
       dockTick: number
       /** What the mascot shows; a new session starts it waving. */
       mascot: MascotState

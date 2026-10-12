@@ -3,7 +3,7 @@
 **AI Tools** is a mod for [Claude Code](https://claude.com/claude-code) that adds one slim ribbon above the prompt.
 At a glance it shows how much of your Claude subscription you have used, how full the conversation is, and what the
 work would have cost at API prices. Behind two small buttons it adds a live checklist of Claude's plan, a panel for
-watching subagents, a panel for tidying up worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
+watching background tasks, a panel for tidying up worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
 stands at the start of the bar acting out what Claude is doing.
 
 It works in the **Code tab of the Claude desktop app** and in the **`claude` terminal app**.
@@ -65,16 +65,14 @@ checklist and Claude's final answer. Pick whichever view you like; picking it ag
 
 ![Task View: a checklist of Claude's plan under the bar](docs/images/taskview.svg)
 
-### Subagents
+### Background tasks
 
-For bigger jobs Claude can hand pieces to subagents, helpers that work at the same time. The **Subagents** pane lists
-each one with what it is doing, how far along it is and how long it has run, and Clawd gets a mini Clawd stacked on his
-head for every helper at work.
+For bigger jobs Claude hands pieces to subagents and runs commands and monitors in the background. The project row
+counts the ones running (`3 tasks`, right of the project's name), and pressing it opens the **Background tasks** pane:
+each task with its type, what it is doing, how far along a subagent is and how long it has run. Clawd gets a mini Clawd
+stacked on his head for every task at work.
 
-The pane can also set a **team size** (3 to 20 helpers at once) and ask Claude to split work across the team, and can
-run helpers on a faster, cheaper model. Leave it on **Default** to just watch.
-
-![The Subagents pane](docs/images/subagents.svg)
+![The Background tasks pane](docs/images/tasks.svg)
 
 ### Worktrees
 
@@ -105,7 +103,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 | `/keepwarm` | Keep the prompt cache warm while you're away: `/keepwarm` for 6 hours, `/keepwarm 90m`, `/keepwarm off`. A ☼ shows on the bar while it runs |
 | `/askme` | Ask the questions from Claude's last answer again as pop-up choices, with a recommendation first |
 | `/taskview`, `/cleanview` | Turn Task View or Clean View on or off |
-| `/subagents` | Open or close the Subagents pane |
+| `/tasks` | Open or close the Background tasks pane |
 | `/worktrees` | Open or close the Worktrees pane |
 
 The full reference for every option is in the [mod's own README](plugins/aitools/README.md).

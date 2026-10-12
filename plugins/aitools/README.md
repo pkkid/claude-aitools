@@ -87,7 +87,7 @@ from. Hiding the bar with `/aitools off` stops all of it.
 ### The settings file
 
 Everything the mod's controls change is saved to `~/.claude/aitools.json` (`$CLAUDE_CONFIG_DIR/aitools.json` when
-that is set): the display options (the project row among them), `/aitools on|off`, the view, and the Subagents pane's
+that is set): the display options (the project row among them), `/aitools on|off`, the view, and the Background tasks pane's
 picks. The first run writes every setting into it, taking over what earlier versions kept in the mod's own store, so
 the file lists everything there is to change. Edit it by hand and the bar follows within 30 seconds, when **⁝** opens,
 or at once when Claude edits it. A file that isn't valid JSON is left alone: the settings stay as they were, and one
@@ -100,7 +100,7 @@ dim line in the chat says what's wrong.
     "show": { "mascot": true, "label": true, "projectRow": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
   },
   "view": "off",
-  "subagents": { "team": "default", "helpers": "same", "showing": "all", "hideAfter": "never" }
+  "subagents": { "showing": "all", "hideAfter": "never" }
 }
 ```
 
@@ -134,7 +134,7 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Worktrees**, **Project** (in a
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Background tasks**, **Worktrees**, **Project** (in a
 GitHub repository), **Task View** and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
@@ -206,8 +206,7 @@ above it): done steps marked with a green ✓, the step in progress with a blue 
 In the menu a ● marks the view that is on and a ○ the one that is off; picking the one that is on turns it off, and
 picking the other switches. The choice holds across sessions.
 
-While one is on, its name shows in the status line under the prompt (with `Subagents` after a comma while the
-Subagents pane is open with a team size picked). `/taskview` and `/cleanview` do the same as the
+While one is on, its name shows in the status line under the prompt. `/taskview` and `/cleanview` do the same as the
 menu from the prompt: no argument toggles that view (turning it on switches off the other), `on` turns it on and `off`
 turns it off.
 
@@ -239,62 +238,61 @@ Clean View recognizes a final reply as the last thing Claude wrote before your n
 conversation when the mod loads (so replies from before a reload or restart still show) and adds each new one as a
 request finishes.
 
-## Subagents
+## Background tasks
 
-**Subagents** in the **🛠** menu opens the Subagents pane; the pane's own close mark closes it. `/subagents` opens it,
-or closes it if open. It stays open until you close it, and comes back after the mod reloads.
+While any background task runs, the [project row](#project-row) counts them right of the project's name (`1 task`,
+`3 tasks`); pressing it opens the Background tasks pane. **Background tasks** in the **🛠** menu opens it too (where
+there is no project row), and `/tasks` opens it, or closes it if open; the pane's own close mark closes it. It stays
+open until you close it, and comes back after the mod reloads.
 
-On the desktop, Clawd stands left of the pane's option rows with a mini Clawd stacked on his head for each subagent
-running in the list (the stack stops growing at four), and sleeps in quiet grey when none is. The status line under the options
-sits beside him too. The terminal has no picture.
+On the desktop, Clawd stands left of the pane's option rows with a mini Clawd stacked on his head for each task
+running in the list (the stack stops growing at four), and sleeps in quiet grey when none is. The header line under
+the options sits beside him too. The terminal has no picture.
 
-While it is open, the pane lists every subagent Claude starts, one per line: Agent tool subagents (foreground or
-background), and the agents of a workflow it starts, named after the workflow (`review-changes · agent 3`, since a
-workflow's agents have no names of their own). The ones running come first (oldest first), then the finished ones, the
-most recently finished first; pieces waiting for a free helper get no line, only a count in the header. Marks are Task
-View's: a blue ● running, a ✓ done, and a red × failed. A running subagent's name is a lighter grey, followed in dim grey by what it is
-doing from its latest tool call (`Reading bar.tsx`, `Running npm test`) and its running time. A line's name and
-what it is doing take the room the pane's width leaves, cut with `…` at the edge. A finished line is all
-dim (but a failed one's ×): no bar, just how long it ran and how long ago it finished, `0:09 (3m ago)`.
+Every background task of the session gets a line, whether the pane is open or not, one per line with its type:
+
+- **Subagent**: a subagent Claude starts with its Agent tool (foreground or background).
+- **Workflow**: an agent of a workflow Claude starts, named after the workflow (`review-changes · agent 3`, since a
+  workflow's agents have no names of their own).
+- **Command**: a shell command run in the background, or sent there with Ctrl+B: its description, then the command.
+- **Monitor**: a monitor watching a command's output or a socket: its description, then what it watches.
+
+The ones running come first (oldest first), then the finished ones, the most recently finished first. Marks are Task
+View's: a blue ● running, a ✓ done, a red × failed, and a dim × stopped (killed by you or Claude). A running task's
+name is a lighter grey, followed in dim grey by what it is doing (a subagent's latest tool call, `Reading bar.tsx`, or
+a command's command line) and its running time. A line's name and what it is doing take the room the pane's width
+leaves, cut with `…` at the edge. A finished line is all dim (but a failed one's ×): no bar, just how long it ran and
+how long ago it finished, `0:09 (3m ago)`.
 
 ```
-Showing: [All] Tool agents  Current task
-Hide completed: [Never] 15m  5m  1m  Immediate
-Set team size: Default  3 [5] 8  10  20
-Set model: [Same as chat] Fast & cheap
+Showing: [All] Subagents  Workflows  Commands  Monitors
+Hide after: [Never] 1h  15m  5m  Immediate
 
-5 agents · 3 working · 2 idle · 1 queued · 1 done
-● Research business licenses · Reading the city site                   40% ▰▰▱▱▱▱  1:20
-✓ Draft the floor plan                                                    0:56 (3m ago)
+2 running · 1 done
+● Subagent Research business licenses · Reading the city site          40% ▰▰▱▱▱▱  1:20
+● Command  Start the dev server · npm run dev                                       4:02
+✓ Subagent Draft the floor plan                                          0:56 (3m ago)
 ```
 
 In each option row the choice in effect is drawn at full strength (shown as `[…]` above); the others are dim, and
 pressing one picks it. They are the same compact buttons as the bar's.
 
-**Set team size** starts on **Default**: subagents run as Claude Code normally runs them, and the pane lists them (no
-team note, no model change, nothing in the status line); each is only asked to report its progress. Pick a size and the team applies too, with `Subagents` in the
-status line. While the pane is closed nothing is tracked; while it is open but not on screen (the status line then
-reads `Subagents (not shown)`) the team does not apply.
+Tasks run as Claude Code normally runs them: the pane only watches, adding no note to your prompts, changing no
+model and putting nothing in the status line. Tracking costs no tokens: the lines are kept in memory for the session.
 
-- **Set team size**: how many helpers may run at once (3, 5, 8, 10 or 20). Past 10 the pane warns in yellow that a
-  big team uses your Claude usage much faster.
-- **Set model** (always shown; faint and unpickable on Default): **Same as chat** (the default) uses the chat's
-  model and reasoning level; **Fast & cheap** runs every helper request on Sonnet 5.5 at low reasoning.
-- With a size picked, each prompt carries a hidden note asking Claude to split a job with separate parts across the
-  team, starting the pieces in parallel.
-- Every subagent Claude starts with its Agent tool while the pane is open (a team helper or not) has its prompt ask it
-  to report how far along it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`); once it
-  does, its line shows its percent (its own estimate) and a bar. A helper's line shows what it says it is doing;
-  other subagents' lines follow their latest tool call. Workflow agents, and subagents started before the pane opened,
-  are not asked, so they show no bar.
-- A full team refuses further starts with a note to try again when a helper finishes (a hook may not hold a start for
-  long); the header counts those pieces as queued until they start.
-- **Showing**: **All** (the default) lists every line; **Tool agents** leaves out workflow agents (only subagents
-  Claude started with its Agent tool); **Current task** only those started since your last prompt. With nothing to
-  list, the pane says what will appear there, e.g. `Tool subagents will appear here when created.`
-- **Hide completed**: how long a finished line stays: **Never** (the default), **15m**, **5m**, **1m** or
+- A task's end is what Claude Code's own notice of it says (completed, failed, killed). A subagent whose end was
+  missed is settled when Claude next replies; a monitor whose closing notice never comes ends a minute past its
+  deadline.
+- Only while the pane is open, every subagent Claude starts with its Agent tool has its prompt ask it to report how
+  far along it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`); once it does, its line
+  shows its percent (its own estimate) and a bar. Workflow agents, commands, monitors, and subagents started while the
+  pane was closed are not asked, so they show no bar.
+- **Showing**: **All** (the default) lists every line; **Subagents**, **Workflows**, **Commands** and **Monitors**
+  each list only that type. With nothing to list, the pane says what will appear there, e.g. `Background commands
+  will appear here when started.`
+- **Hide after**: how long a finished line stays: **Never** (the default), **1h**, **15m**, **5m** or
   **Immediate**. Either way the pane keeps at most the newest 50 finished lines.
-- The team, model, Showing and Hide completed picks are saved.
+- The Showing and Hide after picks are saved.
 - A workflow's agents are told apart from the engine's own background forks (compaction, memory) only by whether a
   workflow has been started this session; after one, such a fork may briefly show as one of its agents.
 - The pane itself starts closed in a new session.
@@ -367,13 +365,14 @@ rest works. Closed, it reads nothing.
 In a GitHub repository a second row sits under the bar, for the project the session works in:
 
 ```
-Vowelit  Project  #42 Login fails on Safari                          ● Running feat/42-login  Stop Server  Docs
+Vowelit  3 tasks  Project  #42 Login fails on Safari                 ● Running feat/42-login  Stop Server  Docs
 ```
 
-On the left, each opening in your browser:
+On the left (the links open in your browser):
 
 - **The repository's name**, as GitHub has it, from the main checkout's GitHub remote (`origin` first),
   opening the repository. `name` in the project file shows a name of your own instead, as written.
+- **`3 tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
 - **Project**: the repository's GitHub Project board, when exactly one is linked to it. It's looked up once a day
   through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
   in the project file.

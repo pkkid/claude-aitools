@@ -2,7 +2,11 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   addCard,
-  dockNote,
+  commandLine,
+  noticeEnd,
+  parseTaskNotices,
+  runningCount,
+  tasksLabel,
   FINISHED_KEEP,
   finishCard,
   headerText,
@@ -10,22 +14,18 @@ import {
   activityText,
   hideAfterLabel,
   visibleCards,
-  isTeamPick,
-  isTeamSize,
   newRun,
   noteActivity,
   orderedCards,
-  queuePiece,
   reportProgress,
   workflowName,
 } from '../src/agentdock'
 import { elapsed } from '../src/format'
 
 describe('agent runs', () => {
-  test('a started helper gets a running card and leaves the queue', () => {
-    const run = addCard(queuePiece(queuePiece(newRun(0), 'Draft'), 'Draft'), 'a1', 'Draft', 5)
-    expect(run.queued).toEqual([])
-    expect(run.cards).toEqual([{ id: 'a1', task: 'Draft', kind: 'helper', status: 'running', startedAt: 5 }])
+  test('a started subagent gets a running line, once', () => {
+    const run = addCard(addCard(newRun(0), 'a1', 'Draft', 5), 'a1', 'Draft', 6)
+    expect(run.cards).toEqual([{ id: 'a1', task: 'Draft', kind: 'subagent', status: 'running', startedAt: 5 }])
     expect(isRunning(run)).toBe(true)
   })
 
@@ -36,10 +36,10 @@ describe('agent runs', () => {
     expect(run.cards[0]).toMatchObject({ doing: 'Reading notes', percent: 100 })
   })
 
-  test('a finished helper is done when it answered, failed otherwise', () => {
+  test('a finished subagent is done when it answered, failed otherwise', () => {
     let run = addCard(addCard(newRun(0), 'a1', 'Draft', 0), 'a2', 'Check', 0)
-    run = finishCard(run, 'a1', true, 9)
-    run = finishCard(run, 'a2', false, 9)
+    run = finishCard(run, 'a1', 'done', 9)
+    run = finishCard(run, 'a2', 'failed', 9)
     expect(run.cards.map(c => [c.status, c.endedAt])).toEqual([
       ['done', 9],
       ['failed', 9],
@@ -49,31 +49,11 @@ describe('agent runs', () => {
 })
 
 describe('dock text', () => {
-  test('team sizes are the five offered', () => {
-    expect([3, 5, 8, 10, 20].every(isTeamSize)).toBe(true)
-    expect(isTeamSize(1)).toBe(false)
-    expect(isTeamSize(4)).toBe(false)
-    expect(isTeamSize(30)).toBe(false)
-    expect(isTeamSize('5')).toBe(false)
-  })
-
-  test('a team pick is Default or one of the sizes', () => {
-    expect(isTeamPick('default')).toBe(true)
-    expect(isTeamPick(5)).toBe(true)
-    expect(isTeamPick('Default')).toBe(false)
-    expect(isTeamPick(undefined)).toBe(false)
-  })
-
-  test('the note names the team size', () => {
-    expect(dockNote(5)).toContain('up to 5 helper agents at once')
-    expect(dockNote(3)).toContain('a team of 3 helper agents for')
-  })
-
-  test('the header shows the team, then only the counts that are not zero', () => {
-    expect(headerText(null, 5)).toBe('5 agents · 5 idle')
-    let run = queuePiece(addCard(addCard(newRun(0), 'a1', 'A', 0), 'a2', 'B', 0), 'C')
-    run = finishCard(run, 'a2', true, 1)
-    expect(headerText(run, 3)).toBe('3 agents · 1 working · 2 idle · 1 queued · 1 done')
+  test('the header shows only the counts that are not zero', () => {
+    expect(headerText(null)).toBe('')
+    let run = addCard(addCard(addCard(newRun(0), 'a1', 'A', 0), 'a2', 'B', 0), 'a3', 'C', 0)
+    run = finishCard(finishCard(run, 'a2', 'done', 1), 'a3', 'failed', 1)
+    expect(headerText(run)).toBe('1 running · 1 done · 1 failed')
   })
 
   test('elapsed reads as minutes and seconds, hours once past one', () => {
@@ -100,21 +80,16 @@ describe('every subagent', () => {
     expect(workflowName({})).toBe('workflow')
   })
 
-  test("activity shows on a subagent's line, never over a helper's own report", () => {
-    let run = addCard(addCard(newRun(0), 'h1', 'Helper', 0, 'helper'), 's1', 'Survey', 0, 'subagent')
-    run = noteActivity(noteActivity(run, 'h1', 'Reading a'), 's1', 'Reading b')
+  test("activity shows on its own subagent's line", () => {
+    let run = addCard(addCard(newRun(0), 's1', 'Survey', 0), 's2', 'Check', 0, 'workflow')
+    run = noteActivity(run, 's2', 'Reading b')
     expect(run.cards.map(c => c.doing)).toEqual([undefined, 'Reading b'])
   })
 
   test('running lines come first, oldest on top; finished ones follow, the latest first', () => {
     let run = addCard(addCard(addCard(newRun(0), 'a', 'A', 1, 'subagent'), 'b', 'B', 2, 'subagent'), 'c', 'C', 3, 'subagent')
-    run = finishCard(finishCard(run, 'b', true, 9), 'a', false, 5)
+    run = finishCard(finishCard(run, 'b', 'done', 9), 'a', 'failed', 5)
     expect(orderedCards(run).map(c => c.id)).toEqual(['c', 'b', 'a'])
-  })
-
-  test('on Default the header has no team, only the counts', () => {
-    const run = queuePiece(addCard(newRun(0), 's1', 'Survey', 0, 'subagent'), 'Later')
-    expect(headerText(run, 'default')).toBe('1 working · 1 queued')
   })
 })
 
@@ -122,7 +97,7 @@ describe('finished lines', () => {
   test('stay for the session, the newest FINISHED_KEEP of them', () => {
     let run = newRun(0)
     for (let i = 0; i <= FINISHED_KEEP; i++) {
-      run = finishCard(addCard(run, `a${i}`, `Task ${i}`, i, 'subagent'), `a${i}`, true, i + 1)
+      run = finishCard(addCard(run, `a${i}`, `Task ${i}`, i, 'subagent'), `a${i}`, 'done', i + 1)
     }
     run = addCard(run, 'live', 'Still going', 99, 'subagent')
     expect(run.cards.filter(c => c.status === 'done')).toHaveLength(FINISHED_KEEP)
@@ -131,34 +106,79 @@ describe('finished lines', () => {
   })
 })
 
-describe('Showing and Hide completed', () => {
+describe('Showing and Hide after', () => {
   const run = finishCard(
     addCard(addCard(addCard(newRun(0), 'old', 'Old', 1_000, 'subagent'), 'wf', 'flow · agent 1', 5_000, 'workflow'), 'new', 'New', 9_000, 'subagent'),
     'old',
-    true,
+    'done',
     2_000,
   )
   const ids = (view: Parameters<typeof visibleCards>[1]) => visibleCards(run.cards, view).map(c => c.id)
-  const base = { showing: 'all' as const, hideAfter: 15 as const, requestAt: null, now: 60_000 }
+  const base = { showing: 'all' as const, hideAfter: 15 as const, now: 60_000 }
 
-  test('All shows every line; Tool agents leaves out workflow agents', () => {
+  test('All shows every line; each kind shows only its own', () => {
     expect(ids(base)).toEqual(['old', 'wf', 'new'])
-    expect(ids({ ...base, showing: 'tool' })).toEqual(['old', 'new'])
+    expect(ids({ ...base, showing: 'subagent' })).toEqual(['old', 'new'])
+    expect(ids({ ...base, showing: 'workflow' })).toEqual(['wf'])
+    expect(ids({ ...base, showing: 'command' })).toEqual([])
   })
 
-  test('Current task shows those started since the last prompt, or all before any', () => {
-    expect(ids({ ...base, showing: 'current', requestAt: 4_000 })).toEqual(['wf', 'new'])
-    expect(ids({ ...base, showing: 'current' })).toEqual(['old', 'wf', 'new'])
-  })
-
-  test("a finished line goes once Hide completed's time is up; Immediate hides it at once", () => {
-    expect(ids({ ...base, hideAfter: 1, now: 61_000 })).toEqual(['old', 'wf', 'new'])
-    expect(ids({ ...base, hideAfter: 1, now: 62_000 })).toEqual(['wf', 'new'])
+  test("a finished line goes once Hide after's time is up; Immediate hides it at once", () => {
+    expect(ids({ ...base, hideAfter: 5, now: 301_000 })).toEqual(['old', 'wf', 'new'])
+    expect(ids({ ...base, hideAfter: 5, now: 302_000 })).toEqual(['wf', 'new'])
     expect(ids({ ...base, hideAfter: 0, now: 2_000 })).toEqual(['wf', 'new'])
     expect(ids({ ...base, hideAfter: 'never', now: 99 * 60 * 60_000 })).toEqual(['old', 'wf', 'new'])
   })
 
   test('the picks read Never, then minutes, then Immediate', () => {
-    expect((['never', 15, 5, 1, 0] as const).map(hideAfterLabel)).toEqual(['Never', '15m', '5m', '1m', 'Immediate'])
+    expect((['never', 60, 15, 5, 0] as const).map(hideAfterLabel)).toEqual(['Never', '1h', '15m', '5m', 'Immediate'])
+  })
+})
+
+describe('background commands and monitors', () => {
+  test("a command's line is its description, else its command; the command is its note", () => {
+    expect(commandLine({ command: 'npm   run dev', description: 'Start the dev server' })).toEqual({
+      task: 'Start the dev server',
+      doing: 'npm run dev',
+    })
+    expect(commandLine({ command: 'npm run dev' })).toEqual({ task: 'npm run dev', doing: 'npm run dev' })
+  })
+
+  test('task notices give each task id with its status or event', () => {
+    const text =
+      '<task-notification>\n<task-id>b7yjorn2h</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n' +
+      '<status>completed</status>\n<summary>Background command "Watch CI" completed (exit code 0)</summary>\n' +
+      '</task-notification>\n<task-notification>\n<task-id>bpj8hhdqa</task-id>\n' +
+      '<summary>Monitor event: "phone on adb"</summary>\n<event>[Monitor expired after 20m with no events delivered.]</event>\n' +
+      '</task-notification>'
+    expect(parseTaskNotices(text)).toEqual([
+      { id: 'b7yjorn2h', status: 'completed', event: undefined },
+      { id: 'bpj8hhdqa', status: undefined, event: '[Monitor expired after 20m with no events delivered.]' },
+    ])
+    expect(parseTaskNotices('no notices here')).toEqual([])
+  })
+
+  test("a notice ends its task by its status, or a monitor's closing event; an ordinary event ends nothing", () => {
+    expect(noticeEnd({ id: 'a', status: 'completed' })).toBe('done')
+    expect(noticeEnd({ id: 'a', status: 'failed' })).toBe('failed')
+    expect(noticeEnd({ id: 'a', status: 'killed' })).toBe('stopped')
+    expect(noticeEnd({ id: 'a', status: 'stopped' })).toBe('stopped')
+    expect(noticeEnd({ id: 'a', event: '[Monitor expired after 30m with 2 events delivered.]' })).toBe('done')
+    expect(noticeEnd({ id: 'a', event: 'PR 291 checks passed' })).toBeNull()
+  })
+
+  test('a finished line keeps how it ended; the header counts stopped ones', () => {
+    let run = addCard(newRun(0), 'c1', 'Dev server', 0, 'command', { doing: 'npm run dev' })
+    expect(runningCount(run)).toBe(1)
+    run = finishCard(run, 'c1', 'stopped', 5)
+    run = finishCard(run, 'c1', 'done', 9)
+    expect(run.cards[0]).toMatchObject({ status: 'stopped', endedAt: 5, doing: 'npm run dev' })
+    expect(runningCount(run)).toBe(0)
+    expect(headerText(run)).toBe('1 stopped')
+  })
+
+  test("the project row's button counts the running tasks", () => {
+    expect(tasksLabel(1)).toBe('1 task')
+    expect(tasksLabel(5)).toBe('5 tasks')
   })
 })

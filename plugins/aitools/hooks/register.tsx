@@ -2,27 +2,29 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Events, Register, Timer } from 'claude-code'
 
 import {
-  FAST_EFFORT,
-  FAST_MODEL,
-  HELPER_LABELS,
-  HELPER_NOTE,
   PROGRESS_SPEC,
   PROGRESS_TOOL_ID,
   SUBAGENT_NOTE,
   DEFAULT_HIDE_AFTER,
   DOCK_PANE,
+  DOCK_TITLE,
   activityText,
   addCard,
-  dockNote,
+  clip,
+  commandLine,
   finishCard,
   isRunning,
+  kindOf,
   newRun,
   noteActivity,
-  queuePiece,
+  noticeEnd,
+  parseTaskNotices,
+  runningCount,
   renderDock,
   reportProgress,
   workflowName,
 } from '../src/agentdock'
+import type { EndStatus } from '../src/agentdock'
 import { CACHE_TTL, renderBar } from '../src/bar'
 import { BOARD_QUERY, BOARD_REFRESH_MS, PROJECT_PANE, parseBoardItems, parseBoardUrl, renderBoard } from '../src/board'
 import { price } from '../src/pricing'
@@ -107,7 +109,7 @@ import type { ProjectChange } from '../src/settingspane'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
 import type { BoardData, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
-import type { AgentKind, AgentShowing, Brief, HelperMode, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, TeamPick, TeamSize, ToggleKey, ViewMode } from '../types'
+import type { AgentCard, AgentKind, AgentRun, AgentShowing, Brief, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
 // function that touches `$` lives here; src/ holds the pure units.
@@ -128,13 +130,10 @@ const viewMode = atom({ plugin: 'aitools', key: 'viewMode' } as const, 'off')
 const checklist = atom({ plugin: 'aitools', key: 'checklist' } as const, null)
 const finals = atom({ plugin: 'aitools', key: 'finals' } as const, [])
 const isDockOpen = atom({ plugin: 'aitools', key: 'isDockOpen' } as const, false)
-const team = atom({ plugin: 'aitools', key: 'team' } as const, 'default' as TeamPick)
-const helpers = atom({ plugin: 'aitools', key: 'helpers' } as const, 'same')
 const agentShowing = atom({ plugin: 'aitools', key: 'agentShowing' } as const, 'all')
 const hideAfter = atom({ plugin: 'aitools', key: 'hideAfter' } as const, DEFAULT_HIDE_AFTER)
-const requestAt = atom({ plugin: 'aitools', key: 'requestAt' } as const, null)
 const agentRun = atom({ plugin: 'aitools', key: 'agentRun' } as const, null)
-const mainEffort = atom({ plugin: 'aitools', key: 'mainEffort' } as const, null)
+const runningTasks = atom({ plugin: 'aitools', key: 'runningTasks' } as const, 0)
 const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
 const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
 const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
@@ -169,26 +168,22 @@ const NOTES_FILE = '.claude/notes.md'
 /** The editor's key in the Notes pane. */
 const NOTES_EDITOR = 'notes-editor'
 
-/** Prompt origins that are the person's own words; anything else (a helper's report, a notice) is not a new request. */
+/** Prompt origins that are the person's own words; anything else (a subagent's report, a notice) is not a new request. */
 const PERSON_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
-/** How many Subagents trace lines the store keeps. */
+/** How many Background tasks trace lines the store keeps. */
 const TRACE_KEEP = 60
 /** The mod's own tools: reporting progress is not work the mascot reacts to. */
 const QUIET_TOOLS: ReadonlySet<string> = new Set([CHECKLIST_TOOL_ID, PROGRESS_TOOL_ID])
-/** How long a helper's first model request waits for its own start to be recorded, at most. */
+/** How long a subagent's first model request waits for its own start to be recorded, at most. */
 const SPAWN_WAIT_MS = 2000
+/** How long past its deadline a monitor's line waits for its own closing notice before it is ended anyway. */
+const MONITOR_GRACE_MS = 60_000
 
-/**
- * Subagents bookkeeping that must change without an `await` between check and write, so helpers started together
- * in one message see each other: the team places taken by starts still in flight, the helpers with a running card,
- * and the starts in flight, which a helper's first model request may wait on before its card exists.
- */
-let reservedPlaces = 0
-const liveHelpers = new Set<string>()
+/** Subagent starts in flight, which a subagent's first model request may wait on before its line exists. */
 const startsInFlight = new Set<Promise<void>>()
 /** Subagent loops already looked at: each gets a line once, or is passed over once (a fork, the pane closed). */
 const seenAgents = new Set<string>()
-/** Subagents with a line that shows their latest tool call (helpers report their own progress instead). */
+/** Subagents with a running line, which shows their latest tool call. */
 const trackedAgents = new Set<string>()
 /** The last workflow the main chat started, and how many of its agents have a line: what workflow agents are called. */
 let lastWorkflow: string | null = null
@@ -201,7 +196,7 @@ let isTurnRunning = false
 let isAskedThisRequest = false
 /** /keepwarm's one pending timer: its next ping, or its end when no ping is due before then. */
 let keepWarmTimer: Timer | null = null
-/** The once-a-second timer that redraws helper times: running only while the Subagents pane is open. */
+/** The once-a-second timer that redraws running times: running only while the Background tasks pane is open. */
 let dockTimer: Timer | null = null
 /** The model tools registered so far: each is offered to the model only once its feature is first turned on. */
 const registeredTools = new Set<string>()
@@ -538,19 +533,10 @@ async function startView($: EngineInterface, mode: ViewMode): Promise<void> {
   }
 }
 
-/**
- * The status line under the prompt: the view that is on and Subagents while a team is picked, comma separated; cleared
- * when none. A Subagents pane open but not on screen (waiting for room) applies nothing, and says so; on Default the
- * pane changes nothing, so the line leaves it out.
- */
+/** The status line under the prompt: the view that is on, if any; cleared when none. */
 async function showStatus($: EngineInterface): Promise<void> {
   const mode = await read($, viewMode)
-  const parts: string[] = mode === 'off' ? [] : [VIEW_NAMES[mode]]
-  if (await isTeamPicked($)) {
-    const pane = (await $.ui.panes()).find(p => p.id === DOCK_PANE)
-    parts.push(pane?.isPlaced === false ? 'Subagents (not shown)' : 'Subagents')
-  }
-  $.ui.status(parts.length > 0 ? parts.join(', ') : undefined)
+  $.ui.status(mode === 'off' ? undefined : VIEW_NAMES[mode])
 }
 
 /** /taskview and /cleanview: toggles the view, or sets it with on/off, and says what is on now. */
@@ -582,21 +568,16 @@ async function startDockTimer($: EngineInterface): Promise<void> {
   }
 }
 
-/** Opens or closes the Subagents pane; closed, none of its settings apply. */
+/** Opens or closes the Background tasks pane; tasks are tracked either way. */
 async function setDockOpen($: EngineInterface, isOpen: boolean): Promise<void> {
   await update($, isDockOpen, () => isOpen)
   if (isOpen) {
-    await $.ui.open({ id: DOCK_PANE, title: 'Subagents' })
+    await $.ui.open({ id: DOCK_PANE, title: DOCK_TITLE })
   } else {
     await $.ui.close({ id: DOCK_PANE })
   }
   await syncDock($)
   await showStatus($)
-}
-
-/** Whether the Subagents pane is open with a team size picked: on Default, or closed, it changes nothing. */
-async function isTeamPicked($: EngineInterface): Promise<boolean> {
-  return (await read($, isDockOpen)) && (await read($, team)) !== 'default'
 }
 
 /**
@@ -613,25 +594,6 @@ async function syncDock($: EngineInterface): Promise<void> {
   await registerTool($, PROGRESS_SPEC)
 }
 
-/**
- * The team size in effect: the pane is open with a size picked and on screen; null otherwise. A pane that went away
- * turns it off; one open but not on screen applies nothing, which the status line says.
- */
-async function activeTeam($: EngineInterface): Promise<TeamSize | null> {
-  if (!(await read($, isDockOpen))) {
-    return null
-  }
-  const pane = (await $.ui.panes()).find(p => p.id === DOCK_PANE)
-  if (pane === undefined) {
-    await update($, isDockOpen, () => false)
-    await syncDock($)
-  }
-  await showStatus($)
-  const pick = await read($, team)
-
-  return pick === 'default' || pane?.isPlaced !== true ? null : pick
-}
-
 /** /subagents: opens the pane if closed, closes it if open. */
 async function toggleDock($: EngineInterface): Promise<boolean> {
   const isOpen = !(await read($, isDockOpen))
@@ -640,24 +602,10 @@ async function toggleDock($: EngineInterface): Promise<boolean> {
   return isOpen
 }
 
-/** The 🛠 menu's Subagents: opens the pane (its own close mark closes it), and closes the menu. */
+/** The 🛠 menu's Background tasks: opens the pane (its own close mark closes it), and closes the menu. */
 async function openDock($: EngineInterface): Promise<void> {
   await update($, isToolsOpen, () => false)
   await setDockOpen($, true)
-}
-
-/** The pane's team pick, saved for later sessions; Default stops its work, a size starts it. */
-async function setTeam($: EngineInterface, pick: TeamPick): Promise<void> {
-  await update($, team, () => pick)
-  await savePersonal($, { team: pick })
-  await syncDock($)
-  await showStatus($)
-}
-
-/** The dock's helper model, saved for later sessions. */
-async function setHelpers($: EngineInterface, mode: HelperMode): Promise<void> {
-  await update($, helpers, () => mode)
-  await savePersonal($, { helpers: mode })
 }
 
 /** The pane's Showing pick, saved for later sessions. */
@@ -666,13 +614,13 @@ async function setShowing($: EngineInterface, showing: AgentShowing): Promise<vo
   await savePersonal($, { showing })
 }
 
-/** The pane's Hide completed pick, saved for later sessions. */
+/** The pane's Hide after pick, saved for later sessions. */
 async function setHideAfter($: EngineInterface, minutes: HideAfter): Promise<void> {
   await update($, hideAfter, () => minutes)
   await savePersonal($, { hideAfter: minutes })
 }
 
-/** Appends one line to the Subagents pane trace in the store, the newest TRACE_KEEP kept, one write after another. */
+/** Appends one line to the Background tasks pane trace in the store, the newest TRACE_KEEP kept, one write after another. */
 function traceDock($: EngineInterface, line: string): Promise<void> {
   traceQueue = traceQueue.then(() => appendTrace($, line)).catch(() => undefined)
 
@@ -695,24 +643,36 @@ function waitAtMost($: EngineInterface, work: Promise<unknown>, ms: number): Pro
 }
 
 /**
- * Marks a subagent finished: a helper's place on the team frees up, and its line turns done or failed and moves down
- * to the top of the finished ones.
+ * Changes the tasks, and the running count the project row shows with them: the row redraws only when the count
+ * changes, not on every line's activity.
  */
-async function endHelper($: EngineInterface, id: string, isAnswered: boolean): Promise<void> {
-  liveHelpers.delete(id)
-  trackedAgents.delete(id)
-  const now = await $.clock.now()
-  await update($, agentRun, run => (run === null ? run : finishCard(run, id, isAnswered, now)))
+async function updateRun($: EngineInterface, change: (run: AgentRun | null) => AgentRun | null): Promise<void> {
+  await update($, agentRun, change)
+  const count = runningCount(await read($, agentRun))
+  if ((await read($, runningTasks)) !== count) {
+    await update($, runningTasks, () => count)
+  }
 }
 
-/** Gives a subagent a line in the pane, once, while it is open; `kind` says how its line follows it. */
-async function trackAgent($: EngineInterface, id: string, task: string, kind: AgentKind): Promise<void> {
-  seenAgents.add(id)
-  if (kind !== 'helper') {
-    trackedAgents.add(id)
-  }
+/** Marks a task finished: its line turns done, failed or stopped and moves down to the top of the finished ones. */
+async function endTask($: EngineInterface, id: string, status: EndStatus): Promise<void> {
+  trackedAgents.delete(id)
   const now = await $.clock.now()
-  await update($, agentRun, r => addCard(r ?? newRun(now), id, task, now, kind))
+  await updateRun($, run => (run === null ? run : finishCard(run, id, status, now)))
+}
+
+/** Gives a task a line, once; a subagent's or workflow agent's line follows its tool calls. */
+async function trackTask(
+  $: EngineInterface,
+  id: string,
+  task: string,
+  kind: AgentKind,
+  extra: Pick<AgentCard, 'doing' | 'expiresAt'> = {},
+): Promise<void> {
+  seenAgents.add(id)
+  if (kind === 'subagent' || kind === 'workflow') trackedAgents.add(id)
+  const now = await $.clock.now()
+  await updateRun($, r => addCard(r ?? newRun(now), id, task, now, kind, extra))
   await startDockTimer($)
 }
 
@@ -723,61 +683,64 @@ async function trackAgent($: EngineInterface, id: string, task: string, kind: Ag
  */
 async function noticeAgent($: EngineInterface, id: string): Promise<void> {
   seenAgents.add(id)
-  if (!(await read($, isDockOpen)) || (await read($, isHandingOff))) {
+  if (await read($, isHandingOff)) {
     return
   }
   const listed = (await $.agent.list().catch(() => [])).find(a => a.id === id)
   if (listed !== undefined) {
-    await trackAgent($, id, listed.description, 'subagent')
+    await trackTask($, id, listed.description, 'subagent')
   } else if (lastWorkflow !== null) {
     workflowAgents += 1
-    await trackAgent($, id, `${lastWorkflow} · agent ${workflowAgents}`, 'workflow')
+    await trackTask($, id, `${lastWorkflow} · agent ${workflowAgents}`, 'workflow')
   }
 }
 
-/** Marks done or failed any card whose helper the engine no longer has running, in case its finish was never heard. */
+/**
+ * Finishes any line whose task is over though its finish was never heard: a subagent the engine no longer has
+ * running, a monitor past its deadline.
+ */
 async function settleCards($: EngineInterface): Promise<void> {
   const run = await read($, agentRun)
   if (!isRunning(run)) {
     return
   }
+  const now = await $.clock.now()
+  for (const card of run?.cards.filter(c => c.status === 'running' && c.expiresAt !== undefined && c.expiresAt <= now) ?? []) {
+    await endTask($, card.id, 'done')
+  }
   const agents = await $.agent.list().catch(() => null)
   if (agents === null) {
     return
   }
-  // A helper the engine no longer lists has finished too; only one listed as running or pending is still at work. A
-  // workflow's agents are never listed: their own finish is the only word on them.
-  for (const card of run?.cards.filter(c => c.status === 'running' && c.kind !== 'workflow') ?? []) {
+  // A subagent the engine no longer lists has finished too; only one listed as running or pending is still at work. A
+  // workflow's agents are never listed, nor are commands and monitors: their own finish is the only word on them.
+  for (const card of run?.cards.filter(c => c.status === 'running' && kindOf(c) === 'subagent') ?? []) {
     const status = agents.find(a => a.id === card.id)?.status ?? 'gone'
     if (status !== 'running' && status !== 'pending') {
       await traceDock($, `settled ${card.task}: ${status}`)
-      await endHelper($, card.id, status !== 'failed' && status !== 'killed')
+      await endTask($, card.id, status === 'failed' ? 'failed' : status === 'killed' ? 'stopped' : 'done')
     }
   }
 }
 
 
 /**
- * Starts a subagent the team does not run: as Claude Code would, given a line in the pane while it is open and asked
- * to report its progress there. Its start counts as in flight, so its first request finds the line rather than racing
- * it.
+ * Starts a subagent as Claude Code would, given a line in the pane; while the pane is open it is also asked to report
+ * its progress there. Its start counts as in flight, so its first request finds the line rather than racing it.
  */
 async function startSubagent(
   $: EngineInterface,
   e: Parameters<Events['agent.spawn']>[1],
   next: Parameters<Events['agent.spawn']>[2],
 ): Promise<Awaited<ReturnType<Events['agent.spawn']>>> {
-  if (!(await read($, isDockOpen))) {
-    return next(e)
-  }
-  if (await isTeamPicked($)) await traceDock($, `ignored ${e.description}: not a team helper`)
+  const note = (await read($, isDockOpen)) ? SUBAGENT_NOTE : ''
   let settle = () => {}
   const inFlight = new Promise<void>(resolve => (settle = resolve))
   startsInFlight.add(inFlight)
   try {
-    const started = await next({ ...e, prompt: e.prompt + SUBAGENT_NOTE })
+    const started = await next({ ...e, prompt: e.prompt + note })
     if (started.agentId !== undefined) {
-      await trackAgent($, started.agentId, e.description, 'subagent')
+      await trackTask($, started.agentId, e.description, 'subagent')
     }
 
     return started
@@ -1511,11 +1474,8 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   await update($, settings, () => p.settings)
   const wasHidden = await read($, isHidden)
   await update($, isHidden, () => p.isHidden)
-  await update($, helpers, () => p.helpers)
   await update($, agentShowing, () => p.showing)
   await update($, hideAfter, () => p.hideAfter)
-  const wasTeam = await read($, team)
-  await update($, team, () => p.team)
   const wasView = await read($, viewMode)
   await update($, viewMode, () => p.view)
   if (isLoad) {
@@ -1526,10 +1486,6 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   }
   for (const key of Object.keys(p.settings) as ToggleKey[]) {
     if (p.settings[key] && !was[key]) await catchUp($, key)
-  }
-  if (wasTeam !== p.team) {
-    await syncDock($)
-    await showStatus($)
   }
   if (wasView !== p.view) {
     await showStatus($)
@@ -2142,6 +2098,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       tools: config?.tools ?? [],
       runs: await read($, toolRuns),
       listeners: await read($, toolListeners),
+      tasks: await read($, runningTasks),
       gap,
     },
     {
@@ -2150,6 +2107,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       stopServer: id => void stopTool($, id),
       toggleLog: id => void toggleLog($, id),
       runCommand: id => void runTool($, id),
+      openTasks: () => void setDockOpen($, true),
     },
   )
 }
@@ -2224,17 +2182,15 @@ export const register: Register = on => {
     }
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
-    await $.command.register({ name: 'subagents', description: 'Open or close the Subagents pane' })
+    await $.command.register({ name: 'tasks', description: 'Open or close the Background tasks pane' })
     // A reload starts the module's bookkeeping over: the running lines are the subagents still at work.
-    liveHelpers.clear()
     for (const card of (await read($, agentRun))?.cards ?? []) {
       seenAgents.add(card.id)
-      if (card.status === 'running' && (card.kind ?? 'helper') === 'helper') liveHelpers.add(card.id)
-      if (card.status === 'running' && card.kind !== undefined && card.kind !== 'helper') trackedAgents.add(card.id)
+      if (card.status === 'running' && (kindOf(card) === 'subagent' || kindOf(card) === 'workflow')) trackedAgents.add(card.id)
     }
     // A reload takes the dock pane down with the old module; the dock stays open until the person closes it.
     if ((await read($, isDockOpen)) && !(await $.ui.panes()).some(p => p.id === DOCK_PANE)) {
-      await $.ui.open({ id: DOCK_PANE, title: 'Subagents' })
+      await $.ui.open({ id: DOCK_PANE, title: DOCK_TITLE })
     }
     await syncDock($)
     // The Notes pane went with the old module too: it opens again on the note as saved.
@@ -2299,40 +2255,27 @@ export const register: Register = on => {
       await update($, cacheAt, () => at)
       // Persisting is a nicety (survives reloads); it must never hold up the model request.
       await rememberCacheAt($, at).catch(() => undefined)
-      // The chat's effort is what Same as chat helpers run at: kept while a team is picked.
-      if (await isTeamPicked($)) {
-        await update($, mainEffort, () => e.effort ?? null)
-      }
-
       return yield* next(e)
     }
     // A subagent: its first request can come before its start is recorded, so an unknown one waits briefly for the
     // starts still in flight, then gets a line if it still has none.
-    if (!liveHelpers.has(e.agentId) && startsInFlight.size > 0) {
+    if (startsInFlight.size > 0) {
       await waitAtMost($, Promise.all(startsInFlight), SPAWN_WAIT_MS)
     }
     if (!seenAgents.has(e.agentId)) {
       await noticeAgent($, e.agentId)
     }
-    // A team helper: every request it makes runs on the team's model and effort.
-    if (!liveHelpers.has(e.agentId)) {
-      return yield* next(e)
-    }
-    if ((await read($, helpers)) === 'fast') {
-      return yield* next({ ...e, model: FAST_MODEL, effort: FAST_EFFORT })
-    }
-    const effort = await read($, mainEffort)
 
-    return yield* next(effort === null ? e : { ...e, effort })
+    return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
       // Only a subagent with a line is the pane's business.
-      if (liveHelpers.has(id) || ((await read($, agentRun))?.cards.some(c => c.id === id) ?? false)) {
+      if ((await read($, agentRun))?.cards.some(c => c.id === id) ?? false) {
         await traceDock($, `finished ${id} (${e.reason})`)
-        await endHelper($, id, e.reason === 'answer')
+        await endTask($, id, e.reason === 'answer' ? 'done' : 'failed')
       }
 
       return next(e)
@@ -2451,10 +2394,16 @@ export const register: Register = on => {
     )
   })
 
-  // The person's own prompt starts a new request, whatever is on: a fresh checklist (the Subagents pane keeps its
-  // finished lines for the session). A helper's report or a task notice arrives as a prompt too, and starts nothing.
-  // A view on, or the pane with a team picked, adds its note.
+  // The person's own prompt starts a new request, whatever is on: a fresh checklist (the Background tasks pane keeps its
+  // finished lines for the session). A task notice arrives as a prompt too, and starts nothing, but a notice that a
+  // task ended finishes its line. A view on adds its note.
   on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind === 'task-notification') {
+      for (const notice of parseTaskNotices(e.text)) {
+        const status = noticeEnd(notice)
+        if (status !== null) await endTask($, notice.id, status)
+      }
+    }
     if (PERSON_ORIGINS.has(e.origin.kind)) {
       // The session's first prompt names the issue the project row links to, if any.
       await noteFirstPrompt($, e.text)
@@ -2462,62 +2411,50 @@ export const register: Register = on => {
       await update($, isQuestionOpen, () => false)
       await update($, isAskable, () => false)
       isAskedThisRequest = false
-      // Where the pane's Current task agents start.
-      if (await read($, isDockOpen)) {
-        const at = await $.clock.now()
-        await update($, requestAt, () => at)
-      }
     }
-    const notes: string[] = []
     const view = viewNote(await read($, viewMode))
-    if (view !== null) notes.push(view)
-    const size = await activeTeam($)
-    if (size !== null) notes.push(dockNote(size))
 
-    return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
+    return view === null ? next(e) : next({ ...e, context: [...(e.context ?? []), view] })
   })
 
-  // With a team picked, a helper the main chat starts runs on the team's model, reports progress, and waits its turn
-  // when the team is full (refused with a note: a hook may not hold the start for long). Any other subagent started
-  // while the pane is open gets a line too, following its tool calls and the progress it reports.
-  on('agent.spawn', async ($, e, next) => {
-    if (e.fork) {
-      return next(e)
-    }
-    const size = e.parentAgentId === undefined ? await activeTeam($) : null
-    if (size === null) {
-      return startSubagent($, e, next)
-    }
-    const now = await $.clock.now()
-    const model = (await read($, helpers)) === 'fast' ? FAST_MODEL : e.parentModel
-    // Check and take a place with no `await` in between, so starts in the same message count each other.
-    const working = liveHelpers.size + reservedPlaces
-    if (working >= size) {
-      await traceDock($, `queued ${e.description} (${working} of ${size} working)`)
-      await update($, agentRun, r => queuePiece(r ?? newRun(now), e.description))
-      return { deny: `Subagents: all ${size} helpers are busy. Start "${e.description}" again once one finishes.` }
-    }
-    reservedPlaces += 1
-    let settle = () => {}
-    const inFlight = new Promise<void>(resolve => (settle = resolve))
-    startsInFlight.add(inFlight)
-    try {
-      const started = await next({ ...e, model, prompt: e.prompt + HELPER_NOTE })
-      await traceDock($, `started ${e.description}: ${started.agentId ?? started.deny ?? 'no id'}`)
-      if (started.agentId !== undefined) {
-        const id = started.agentId
-        liveHelpers.add(id)
-        seenAgents.add(id)
-        await update($, agentRun, r => addCard(r ?? newRun(now), id, e.description, now, 'helper'))
-        await startDockTimer($)
-      }
+  // Every subagent gets a line, following its tool calls and, while the pane is open, the progress it reports.
+  on('agent.spawn', ($, e, next) => (e.fork ? next(e) : startSubagent($, e, next)))
 
-      return started
-    } finally {
-      reservedPlaces -= 1
-      startsInFlight.delete(inFlight)
-      settle()
+  // A command run in the background, or sent there with Ctrl+B, gets a line until its notice says it ended.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const result = await next(e)
+    const taskId = 'result' in result ? (result.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId : undefined
+    if (typeof taskId === 'string') {
+      const line = commandLine(e)
+      await trackTask($, taskId, line.task, 'command', { doing: line.doing })
     }
+
+    return result
+  })
+
+  // A monitor gets a line until its notice says it ended, or its deadline passes.
+  on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
+    const result = await next(e)
+    const started = 'result' in result ? (result.result as { taskId?: unknown; timeoutMs?: unknown; persistent?: unknown } | undefined) : undefined
+    if (typeof started?.taskId === 'string') {
+      const id = started.taskId
+      const timeoutMs = typeof started.timeoutMs === 'number' && started.persistent !== true ? started.timeoutMs : 0
+      const expiresAt = timeoutMs > 0 ? (await $.clock.now()) + timeoutMs + MONITOR_GRACE_MS : undefined
+      await trackTask($, id, clip(e.description, 60) || 'Monitor', 'monitor', { expiresAt, doing: clip(e.command ?? e.ws?.url, 60) || undefined })
+      if (expiresAt !== undefined) $.clock.after(timeoutMs + MONITOR_GRACE_MS, () => void settleCards($))
+    }
+
+    return result
+  })
+
+  // A task Claude stops ends as stopped.
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const result = await next(e)
+    const stopped = 'result' in result ? (result.result as { task_id?: unknown } | undefined)?.task_id : undefined
+    const id = typeof stopped === 'string' ? stopped : (e.task_id ?? e.shell_id)
+    if (result.deny === undefined && result.isError !== true && id !== undefined) await endTask($, id, 'stopped')
+
+    return result
   })
 
   // A workflow the main chat starts: its agents' lines take its name.
@@ -2543,16 +2480,8 @@ export const register: Register = on => {
     return { result: 'Progress noted.' }
   })
 
-  on('command.run', { command: 'subagents' }, async $ => {
-    if (!(await toggleDock($))) {
-      return { text: 'Subagents closed.' }
-    }
-    const size = await read($, team)
-    if (size === 'default') {
-      return { text: 'Subagents open: Default, subagents run as usual.' }
-    }
-
-    return { text: `Subagents open: ${size} ${HELPER_LABELS[await read($, helpers)]} helpers.` }
+  on('command.run', { command: 'tasks' }, async $ => {
+    return { text: (await toggleDock($)) ? 'Background tasks open.' : 'Background tasks closed.' }
   })
 
   on('command.run', { command: 'worktrees' }, async $ => {
@@ -2625,11 +2554,8 @@ export const register: Register = on => {
     // The 30-second tick keeps finished lines' `3m ago` current.
     await read($, tick)
     const state = {
-      team: await read($, team),
-      helpers: await read($, helpers),
       showing: await read($, agentShowing),
       hideAfter: await read($, hideAfter),
-      requestAt: await read($, requestAt),
       run: await read($, agentRun),
       now: await $.clock.now(),
     }
@@ -2639,8 +2565,6 @@ export const register: Register = on => {
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
 
     return renderDock({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, state, {
-      setTeam: size => void setTeam($, size),
-      setHelpers: mode => void setHelpers($, mode),
       setShowing: showing => void setShowing($, showing),
       setHideAfter: minutes => void setHideAfter($, minutes),
     })
@@ -2714,12 +2638,12 @@ export const register: Register = on => {
   // The mascot follows the main chat's tools: reading while a read-only tool runs, puzzled while an AskUserQuestion
   // dialog waits (its `next` resolves once answered), startled when a call fails or is refused.
   //
-  // A subagent with a line in the Subagents pane shows its latest tool call there, while the pane is open:
-  // `Reading bar.tsx`, `Running npm test`.
+  // A subagent with a line in the Background tasks pane shows its latest tool call there: `Reading bar.tsx`,
+  // `Running npm test`.
   on('tool.call', async ($, e, next) => {
     try {
       if (e.agentId !== undefined) {
-        if (trackedAgents.has(e.agentId) && (await read($, isDockOpen))) {
+        if (trackedAgents.has(e.agentId)) {
           const id = e.agentId
           const doing = activityText(e.tool, e as unknown as Record<string, unknown>)
           await update($, agentRun, run => (run === null ? run : noteActivity(run, id, doing)))

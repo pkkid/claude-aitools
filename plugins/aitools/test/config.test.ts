@@ -25,16 +25,14 @@ describe('personalFrom', () => {
     const p = personalFrom({
       bar: { hidden: true, show: { label: false, projectRow: false, mascot: 'yes' } },
       view: 'clean',
-      subagents: { team: 8, helpers: 'fast', showing: 'tool', hideAfter: 5 },
+      subagents: { showing: 'subagent', hideAfter: 5 },
     })
     expect(p.isHidden).toBe(true)
     expect(p.settings).toEqual({ ...DEFAULT_SETTINGS, label: false, projectRow: false })
     expect(p.view).toBe('clean')
-    expect(p.team).toBe(8)
-    expect(p.helpers).toBe('fast')
-    expect(p.showing).toBe('tool')
+    expect(p.showing).toBe('subagent')
     expect(p.hideAfter).toBe(5)
-    expect(personalFrom({ view: 'loud', subagents: { team: 7, hideAfter: 2 } })).toMatchObject({ view: 'off', team: 'default', hideAfter: 'never' })
+    expect(personalFrom({ view: 'loud', subagents: { showing: 'some', hideAfter: 2 } })).toMatchObject({ view: 'off', showing: 'all', hideAfter: 'never' })
   })
 })
 
@@ -47,19 +45,25 @@ describe('withPersonal', () => {
       project: { name: 'x' },
       mine: 1,
     })
-    expect(withPersonal({}, { team: 5 })).toEqual({ subagents: { team: 5 } })
+    expect(withPersonal({}, { hideAfter: 5 })).toEqual({ subagents: { hideAfter: 5 } })
   })
 })
 
 describe('migrated', () => {
+  test('drops the team size and helper model the Subagents pane no longer has, and keeps the rest', () => {
+    const filled = migrated({ subagents: { team: 5, helpers: 'fast', hideAfter: 5 }, mine: 1 }, {})
+    expect(filled.subagents).toEqual({ hideAfter: 5, showing: 'all' })
+    expect(filled.mine).toBe(1)
+  })
+
   test("a file from before the limits' resets were apart gives both its Reset countdowns pick", () => {
     const filled = migrated({ bar: { show: { resets: false } } }, {})
     expect(filled.bar).toMatchObject({ show: { fiveHourReset: false, weeklyReset: false } })
   })
 
   test("a first run takes the store's settings, and fills the rest with defaults", () => {
-    const filled = migrated({}, { settings: { label: false }, isHidden: true, viewMode: 'task', agentTeam: 10 })
-    expect(personalFrom(filled)).toEqual({ ...PERSONAL_DEFAULTS, settings: { ...DEFAULT_SETTINGS, label: false }, isHidden: true, view: 'task', team: 10 })
+    const filled = migrated({}, { settings: { label: false }, isHidden: true, viewMode: 'task', agentShowing: 'subagent' })
+    expect(personalFrom(filled)).toEqual({ ...PERSONAL_DEFAULTS, settings: { ...DEFAULT_SETTINGS, label: false }, isHidden: true, view: 'task', showing: 'subagent' })
     expect(Object.keys((filled.bar as { show: object }).show)).toHaveLength(Object.keys(DEFAULT_SETTINGS).length)
   })
 

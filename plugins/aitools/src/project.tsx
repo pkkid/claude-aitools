@@ -1,12 +1,14 @@
 /**
  * The project row: a second line under the bar for the GitHub repository the session works in. On the left the
- * repository's name, its GitHub Project board and the issue the session is about, each opening in the browser; on
+ * repository's name, how many background tasks run (opening their pane), its GitHub Project board and the issue the
+ * session is about, each opening in the browser; on
  * the right the tools the project's own `.claude/aitools.json` defines (links, servers, commands). Outside a GitHub
  * repository the row is not drawn.
  */
 
 import type { Elements } from 'claude-code'
 
+import { tasksLabel } from './agentdock'
 import { objectAt } from './config'
 import type { Json } from './config'
 import { DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
@@ -192,6 +194,8 @@ export type RowView = {
   tools: readonly ProjectTool[]
   runs: Readonly<Record<string, ToolRun>>
   listeners: Readonly<Record<string, ToolListener | null>>
+  /** How many background tasks are running: a button after the name opens their pane while any is. */
+  tasks: number
   /** Room between neighboring buttons: the desktop's own chrome parts them, the terminal needs spaces. */
   gap: number
 }
@@ -214,6 +218,7 @@ export function renderProjectRow(
     stopServer(id: string): void
     toggleLog(id: string): void
     runCommand(id: string): void
+    openTasks(): void
   },
 ) {
   const { Box, Text, Button } = el
@@ -223,6 +228,7 @@ export function renderProjectRow(
     <Box flexDirection="row" justifyContent="space-between" width="100%">
       <Box key="project-left" flexDirection="row" gap={gap} flexShrink={1} alignItems="center">
         <Button key="project-name" label={view.name} {...QUIET} onPress={() => on.open(repo.url)} />
+        {view.tasks > 0 && <Button key="project-tasks" label={tasksLabel(view.tasks)} {...QUIET} onPress={() => on.openTasks()} />}
         {view.boardUrl !== null && <Button key="project-board" label="Project" {...QUIET} onPress={() => on.open(view.boardUrl ?? repo.url)} />}
         {view.issue !== null && (
           <Button

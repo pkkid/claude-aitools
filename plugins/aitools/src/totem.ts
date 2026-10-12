@@ -1,6 +1,6 @@
 /**
- * The Subagents pane's picture on surfaces that draw SVG (the desktop Code tab): Clawd with a mini Clawd stacked on
- * his head for each subagent running, asleep when none is.
+ * The Background tasks pane's picture on surfaces that draw SVG (the desktop Code tab): Clawd with a mini Clawd stacked on
+ * his head for each task running, asleep when none is.
  *
  * A 24 x 26 pixel grid scaled to PANE_PICTURE_HEIGHT, three text rows tall, as every pane picture is.
  * Clawd is the bar's mascot moved down DROP rows to stand on the bottom one; each mini Clawd is a 9 x 3 body on four

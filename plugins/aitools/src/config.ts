@@ -3,16 +3,16 @@
  *
  * `~/.claude/aitools.json` (under CLAUDE_CONFIG_DIR when set) holds the person's own settings: what the bar shows
  * (the project row among it),
- * the view, the Subagents pane's picks. Everything the mod's own controls change is written here, never to a
+ * the view, the Background tasks pane's picks. Everything the mod's own controls change is written here, never to a
  * project's file. `<repo>/.claude/aitools.json` holds only the `project` section (src/project.tsx reads it).
  *
  * Both files are JSON. A write reads the file again first and changes only the keys it sets, so hand edits and keys
  * the mod does not know are kept.
  */
 
-import { DEFAULT_HIDE_AFTER, isHideAfter, isShowing, isTeamPick } from './agentdock'
+import { DEFAULT_HIDE_AFTER, isHideAfter, isShowing } from './agentdock'
 import { DEFAULT_SETTINGS, LEGACY_KEYS, normalizeSettings } from './settings'
-import type { AgentShowing, HelperMode, HideAfter, Settings, TeamPick, ViewMode } from '../types'
+import type { AgentShowing, HideAfter, Settings, ViewMode } from '../types'
 
 /** The file's name, in the Claude config folder and in a project's `.claude` folder. */
 export const CONFIG_FILE = 'aitools.json'
@@ -26,8 +26,6 @@ export type Personal = {
   /** `/aitools off`: the whole bar hidden. */
   isHidden: boolean
   view: ViewMode
-  team: TeamPick
-  helpers: HelperMode
   showing: AgentShowing
   hideAfter: HideAfter
 }
@@ -36,8 +34,6 @@ export const PERSONAL_DEFAULTS: Personal = {
   settings: DEFAULT_SETTINGS,
   isHidden: false,
   view: 'off',
-  team: 'default',
-  helpers: 'same',
   showing: 'all',
   hideAfter: DEFAULT_HIDE_AFTER,
 }
@@ -78,8 +74,6 @@ export function personalFrom(raw: Json): Personal {
     settings: normalizeSettings(objectAt(bar, 'show')),
     isHidden: bar.hidden === true,
     view: view === 'task' || view === 'clean' ? view : 'off',
-    team: isTeamPick(subagents.team) ? subagents.team : PERSONAL_DEFAULTS.team,
-    helpers: subagents.helpers === 'fast' ? 'fast' : 'same',
     showing: isShowing(subagents.showing) ? subagents.showing : PERSONAL_DEFAULTS.showing,
     hideAfter: isHideAfter(subagents.hideAfter) ? subagents.hideAfter : PERSONAL_DEFAULTS.hideAfter,
   }
@@ -90,8 +84,6 @@ const PATHS: { [K in keyof Personal]: readonly [string, ...string[]] } = {
   settings: ['bar', 'show'],
   isHidden: ['bar', 'hidden'],
   view: ['view'],
-  team: ['subagents', 'team'],
-  helpers: ['subagents', 'helpers'],
   showing: ['subagents', 'showing'],
   hideAfter: ['subagents', 'hideAfter'],
 }
@@ -125,6 +117,26 @@ export function withPersonal(raw: Json, change: Partial<Personal>): Json {
   return next
 }
 
+/** Settings the mod no longer has: dropped from the file when it is next filled in. */
+const RETIRED_PATHS = [
+  ['subagents', 'team'],
+  ['subagents', 'helpers'],
+] as const
+
+/** The file without the setting at `path`; the file as it was when it has none. */
+function withoutAt(raw: Json, path: readonly string[]): Json {
+  const [key, ...rest] = path
+  if (key === undefined || !hasAt(raw, path)) {
+    return raw
+  }
+  if (rest.length === 0) {
+    const { [key]: _, ...kept } = raw
+    return kept
+  }
+
+  return { ...raw, [key]: withoutAt(objectAt(raw, key), rest) }
+}
+
 /** The settings the mod kept in its store before the file existed, under their old keys. */
 export type StoredSettings = Partial<Record<(typeof STORED_KEYS)[number], unknown>>
 
@@ -133,15 +145,16 @@ export const STORED_KEYS = ['settings', 'isHidden', 'viewMode', 'agentTeam', 'ag
 
 /**
  * The file with every setting it lacks filled in: from the store where the mod kept it before, else its default, so
- * the file shows every setting there is. What the file already holds wins.
+ * the file shows every setting there is, and with any setting the mod no longer has removed. What the file already
+ * holds wins.
  */
 export function migrated(raw: Json, stored: StoredSettings): Json {
   const old = personalFrom({
     bar: { show: stored.settings, hidden: stored.isHidden },
     view: stored.viewMode,
-    subagents: { team: stored.agentTeam, helpers: stored.agentHelpers, showing: stored.agentShowing, hideAfter: stored.agentHideAfter },
+    subagents: { showing: stored.agentShowing, hideAfter: stored.agentHideAfter },
   })
-  let next = raw
+  let next = RETIRED_PATHS.reduce(withoutAt, raw)
   for (const key of Object.keys(PATHS) as (keyof Personal)[]) {
     if (key === 'settings') {
       // Each display option on its own, so one added in a later version joins a file that has the rest.
