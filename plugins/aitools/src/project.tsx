@@ -7,9 +7,9 @@
 
 import type { Elements } from 'claude-code'
 
-import { DOING_TEXT, FAINT_TEXT } from './checklist'
 import { objectAt } from './config'
 import type { Json } from './config'
+import { DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
 import type { GithubRepo, ProjectConfig, ProjectTool, ToolListener, ToolRun } from '../types'
 
 /** A GitHub repository from a git remote URL: `https://github.com/o/r(.git)`, `git@github.com:o/r.git`, `ssh://…`. */
@@ -149,17 +149,17 @@ export function projectFrom(raw: Json): ProjectConfig {
 export function serverStatus(run: ToolRun | undefined, listener: ToolListener | null | undefined): { dot: string; text: string; color?: string } {
   const phase = run?.phase ?? 'idle'
   const branch = run?.branch ?? ''
-  if (phase === 'stopping') return { dot: '○', text: branch ? `Stopping ${branch}…` : 'Stopping…', color: 'yellow' }
-  if (phase === 'starting') return { dot: '○', text: branch ? `Starting ${branch}…` : 'Starting…', color: 'yellow' }
-  if (phase === 'ready') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: 'green' }
-  if (listener) return { dot: '●', text: `Running ${listener.label}`, color: 'green' }
-  if (phase === 'running') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: 'green' }
+  if (phase === 'stopping') return { dot: '○', text: branch ? `Stopping ${branch}…` : 'Stopping…', color: YELLOW }
+  if (phase === 'starting') return { dot: '○', text: branch ? `Starting ${branch}…` : 'Starting…', color: YELLOW }
+  if (phase === 'ready') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: GREEN }
+  if (listener) return { dot: '●', text: `Running ${listener.label}`, color: GREEN }
+  if (phase === 'running') return { dot: '●', text: branch ? `Running ${branch}` : 'Running', color: GREEN }
   if (phase === 'exited') {
     // Exiting with code 0, or on the stop signal a Stop sends, is a clean end: dim like Stopped, not red.
     const isClean = /^(code 0|SIGTERM|SIGINT)$/.test(run?.detail ?? '')
-    return { dot: '○', text: `Exited${run?.detail ? ` (${run.detail})` : ''}`, ...(isClean ? {} : { color: 'red' }) }
+    return { dot: '○', text: `Exited${run?.detail ? ` (${run.detail})` : ''}`, ...(isClean ? {} : { color: RED }) }
   }
-  if (phase === 'failed') return { dot: '○', text: `Failed${run?.detail ? `: ${run.detail}` : ''}`, color: 'red' }
+  if (phase === 'failed') return { dot: '○', text: `Failed${run?.detail ? `: ${run.detail}` : ''}`, color: RED }
 
   return { dot: '○', text: 'Stopped' }
 }
@@ -171,9 +171,9 @@ export function isServerUp(run: ToolRun | undefined, listener: ToolListener | nu
 
 /** A command tool's dot: yellow while it runs, green once it passed, red once it failed; none before it ran. */
 export function commandDot(run: ToolRun | undefined): { dot: string; color: string } | null {
-  if (run?.phase === 'running') return { dot: '●', color: 'yellow' }
-  if (run?.phase === 'passed') return { dot: '●', color: 'green' }
-  if (run?.phase === 'failed' || run?.phase === 'exited') return { dot: '●', color: 'red' }
+  if (run?.phase === 'running') return { dot: '●', color: YELLOW }
+  if (run?.phase === 'passed') return { dot: '●', color: GREEN }
+  if (run?.phase === 'failed' || run?.phase === 'exited') return { dot: '●', color: RED }
 
   return null
 }

@@ -418,7 +418,7 @@ draft Idea: daily puzzle mode                               ○ Todo
 - Each line has the item's number (opening it; `name#12` for another repository's, `draft` for a draft), its title,
   its Status and its pull request: the item itself when it is one, else the pull request that closes it (an open one
   first, then a merged one).
-- Where SVG is drawn (the desktop), Clawd stacks task blocks top right; he sleeps by the finished tower when nothing is
+- Where SVG is drawn (the desktop), Clawd stacks task blocks top left; he sleeps by the finished tower when nothing is
   open, and scratches his head at a fallen one when there is no board to read.
 
 The board is read with **one** GitHub API query (the first 100 items, through `gh`, which needs the `read:project`

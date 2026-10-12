@@ -30,7 +30,6 @@ import {
   CHECKLIST_SPEC,
   CHECKLIST_TOOL_ID,
   VIEW_NAMES,
-  FAINT_TEXT,
   addFinal,
   finalReplies,
   isFinalReply,
@@ -39,6 +38,7 @@ import {
   renderChecklist,
   viewNote,
 } from '../src/checklist'
+import { FAINT_TEXT, RED } from '../src/palette'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
@@ -2391,7 +2391,7 @@ export const register: Register = on => {
       return <Text dimColor>Writing the handoff brief…</Text>
     }
     if (shown.status === 'error') {
-      return <Text color="red">{shown.text}</Text>
+      return <Text color={RED}>{shown.text}</Text>
     }
 
     return (
@@ -2587,7 +2587,7 @@ export const register: Register = on => {
       return <Text dimColor>Loading the note…</Text>
     }
     if ('error' in shown) {
-      return <Text color="red">{shown.error}</Text>
+      return <Text color={RED}>{shown.error}</Text>
     }
     if (!('Client' in el)) {
       return <Text dimColor>{`The note can't be edited here; it is kept in ${NOTES_FILE}.`}</Text>

@@ -1,8 +1,9 @@
 import type { Elements } from 'claude-code'
 
 import type { AgentCard, AgentKind, AgentRun, AgentShowing, HelperMode, HideAfter, TeamPick, TeamSize } from '../types'
-import { BLUE, DOING_TEXT, FAINT_TEXT, progressBar } from './checklist'
+import { progressBar } from './checklist'
 import { ago, elapsed } from './format'
+import { BLUE, DOING_TEXT, FAINT_TEXT, RED, YELLOW } from './palette'
 import { TOTEM_HEIGHT, TOTEM_WIDTH, totemAlt, totemSvg } from './totem'
 
 export const TEAM_SIZES = [3, 5, 8, 10, 20] as const
@@ -300,7 +301,7 @@ export function renderDock(
         <Box flexDirection="column" flexShrink={1} gap={1}>
           {renderControls(el, dock, on)}
           {team !== 'default' && team > LARGE_TEAM && (
-            <Text color="yellow">{`⚠ A team of ${team} uses your Claude usage much faster.`}</Text>
+            <Text color={YELLOW}>{`⚠ A team of ${team} uses your Claude usage much faster.`}</Text>
           )}
           {isEmpty ? (
             <Box flexDirection="column">
@@ -414,7 +415,7 @@ function renderCard(el: El, card: AgentCard, now: number) {
     return (
       <Box key={`agent-${card.id}`} flexDirection="row" justifyContent="space-between">
         <Box flexDirection="row" flexShrink={1}>
-          <Text color={card.status === 'failed' ? 'red' : FAINT_TEXT}>{`${CARD_MARKS[card.status]} `}</Text>
+          <Text color={card.status === 'failed' ? RED : FAINT_TEXT}>{`${CARD_MARKS[card.status]} `}</Text>
           <Text color={FAINT_TEXT} wrap="truncate-end">
             {clipLine(card.task).task}
           </Text>

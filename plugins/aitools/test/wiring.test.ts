@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import { SUBAGENT_NOTE } from '../src/agentdock'
 import { askmeText } from '../src/askme'
+import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from '../src/palette'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
@@ -497,16 +498,16 @@ describe('wiring', () => {
       await ui.unmount()
       const marks = texts.filter(t => ['✓ ', '● ', '○ '].includes(t.text))
       expect(marks.map(m => [m.text, m.props.color ?? null, m.props.dimColor ?? false])).toEqual([
-        ['✓ ', '#6fbe49', false],
-        ['● ', '#478487', false],
+        ['✓ ', GREEN, false],
+        ['● ', BLUE, false],
         ['○ ', null, true],
       ])
       const doing = texts.find(t => t.text === 'Add the tokens')
-      expect([doing?.props.color, doing?.props.bold ?? false, doing?.props.dimColor ?? false]).toEqual(['#b0b0b0', false, false])
+      expect([doing?.props.color, doing?.props.bold ?? false, doing?.props.dimColor ?? false]).toEqual([DOING_TEXT, false, false])
       const fills = texts.filter(t => /^▰+$/.test(t.text))
       expect(fills.map(f => [f.text, f.props.color ?? null])).toEqual([
-        ['▰▰▰▰▰▰', '#6fbe49'],
-        ['▰▰', '#478487'],
+        ['▰▰▰▰▰▰', GREEN],
+        ['▰▰', BLUE],
       ])
     })
 
@@ -679,7 +680,7 @@ describe('wiring', () => {
       expect(await picks(pane, 'team-')).toEqual(['team-default', 'team-3', 'team-5', 'team-8', 'team-10', 'team-20'])
       expect(await pick(pane, 'team-default')).toBe('[x] Default')
       // Set model shows on Default, faint and unpickable: text, not buttons.
-      expect((await pane.find({ type: 'Text', text: 'Same as chat' }))?.props.color).toBe('#808080')
+      expect((await pane.find({ type: 'Text', text: 'Same as chat' }))?.props.color).toBe(FAINT_TEXT)
       expect(await pane.find({ type: 'Button', text: 'Same as chat' })).toBeUndefined()
       expect(await pane.find({ text: /run as Claude Code normally runs them/ })).toBeUndefined()
       await pane.unmount()
@@ -793,7 +794,7 @@ describe('wiring', () => {
       const dock = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
       const task = (await dock.findAll({ type: 'Text' })).find(t => t.text.startsWith('Licenses'))
       await dock.unmount()
-      expect([task?.props.color, task?.props.bold ?? false]).toEqual(['#b0b0b0', false])
+      expect([task?.props.color, task?.props.bold ?? false]).toEqual([DOING_TEXT, false])
       expect(text).toContain('3 agents · 3 working · 1 queued')
       expect(text).toContain('Licenses · Reading the city site')
       expect(text).toContain(' 40% ▰▰▱▱▱▱')
@@ -946,11 +947,11 @@ describe('wiring', () => {
       const texts = await pane.findAll({ type: 'Text' })
       await pane.unmount()
       const find = (text: string) => texts.find(t => t.text === text)
-      expect(find('Survey the code')?.props.color).toBe('#b0b0b0')
-      expect(find(' · Reading bar.tsx')?.props.color).toBe('#808080')
-      expect(find('✓ ')?.props.color).toBe('#808080')
-      expect(find('Write tests')?.props.color).toBe('#808080')
-      expect(find(' 0:00 (3m ago)')?.props.color).toBe('#808080')
+      expect(find('Survey the code')?.props.color).toBe(DOING_TEXT)
+      expect(find(' · Reading bar.tsx')?.props.color).toBe(FAINT_TEXT)
+      expect(find('✓ ')?.props.color).toBe(FAINT_TEXT)
+      expect(find('Write tests')?.props.color).toBe(FAINT_TEXT)
+      expect(find(' 0:00 (3m ago)')?.props.color).toBe(FAINT_TEXT)
       expect(find(' 0:00 (3m ago)')).toBeDefined()
     })
 
@@ -1375,7 +1376,7 @@ describe('wiring', () => {
       const pane = await $.ui.mount(notesPane('desktop'))
       expect((await pane.find({ type: 'Client' }))?.props.props).toEqual({ text: 'Buy milk', columns: 80 })
       const saved = (await pane.findAll({ type: 'Text' }))[0]
-      expect([saved?.text, saved?.props.color]).toEqual(['Note saved to .claude/notes.md in your project.', '#808080'])
+      expect([saved?.text, saved?.props.color]).toEqual(['Note saved to .claude/notes.md in your project.', FAINT_TEXT])
       await pane.unmount()
     })
 

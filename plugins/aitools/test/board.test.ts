@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { filterCounts, filterItems, isDone, itemId, metaText, parseBoardItems, parseBoardUrl, pickPr, statusMark, statusText, towerMode } from '../src/board'
 import { TOWER_HEIGHT, TOWER_WIDTH, towerAlt, towerSvg } from '../src/tower'
 import type { BoardItem } from '../types'
+import { RED, YELLOW } from '../src/palette'
 
 const item = (over: Partial<BoardItem> = {}): BoardItem => ({
   kind: 'issue',
@@ -89,8 +90,8 @@ describe('board: the pane', () => {
 
   test('status marks by name, long names cut', () => {
     expect(statusMark('Todo').dot).toBe('○')
-    expect(statusMark('In Progress').color).toBe('yellow')
-    expect(statusMark('Blocked').color).toBe('red')
+    expect(statusMark('In Progress').color).toBe(YELLOW)
+    expect(statusMark('Blocked').color).toBe(RED)
     expect(statusMark('Done').dot).toBe('●')
     expect(statusText(null)).toBe('○ –')
     expect(statusText('Waiting on design review')).toBe('● Waiting on de…')

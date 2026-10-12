@@ -1,12 +1,12 @@
 /**
  * The Project pane: the GitHub Project board's items, each with its id, title, Status and pull request, read with one
  * GraphQL query at most every BOARD_REFRESH_MS while the pane is open. A header links to the board and filters the
- * items to the open ones, the done ones or all; where SVG is drawn, Clawd stacks task blocks at the top right.
+ * items to the open ones, the done ones or all; where SVG is drawn, Clawd stacks task blocks at the top left.
  */
 
 import type { Elements, RenderChildren } from 'claude-code'
 
-import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from './checklist'
+import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
 import { TOWER_HEIGHT, TOWER_WIDTH, towerAlt, towerSvg } from './tower'
 import { age } from './worktrees'
 import type { BoardData, BoardFilter, BoardItem, BoardState, TowerMode } from '../types'
@@ -149,9 +149,9 @@ export function statusMark(status: string | null): { dot: string; color: string 
   const s = status?.trim().toLowerCase() ?? ''
   if (s === '') return { dot: '○', color: FAINT_TEXT }
   if (DONE_STATUS.test(s)) return { dot: '●', color: GREEN }
-  if (/block/.test(s)) return { dot: '●', color: 'red' }
+  if (/block/.test(s)) return { dot: '●', color: RED }
   if (/review/.test(s)) return { dot: '●', color: BLUE }
-  if (/progress|doing|active|working|started/.test(s)) return { dot: '●', color: 'yellow' }
+  if (/progress|doing|active|working|started/.test(s)) return { dot: '●', color: YELLOW }
   if (/todo|to do|backlog|ready|new|triage|planned|later/.test(s)) return { dot: '○', color: FAINT_TEXT }
 
   return { dot: '●', color: DOING_TEXT }
@@ -211,7 +211,7 @@ type BoardActions = { open(url: string): void; setFilter(filter: BoardFilter): v
 
 /**
  * The pane: the board's name, Open in GitHub and a faint note on one line, the filters and Refresh on the next, Clawd
- * to their right; then a line per item in fixed-width columns.
+ * to their left; then a line per item in fixed-width columns.
  */
 export function renderBoard(el: El, view: BoardView, on: BoardActions) {
   const { Box, Text, Button, Svg } = el
@@ -261,15 +261,15 @@ export function renderBoard(el: El, view: BoardView, on: BoardActions) {
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="column" flexShrink={1}>
-          {header}
-        </Box>
+      <Box flexDirection="row">
         {Svg && (
-          <Box key="tower" flexShrink={0} marginLeft={2}>
+          <Box key="tower" flexShrink={0} marginRight={2}>
             <Svg source={towerSvg(mode)} alt={towerAlt(mode)} width={TOWER_WIDTH} height={TOWER_HEIGHT} />
           </Box>
         )}
+        <Box flexDirection="column" flexShrink={1}>
+          {header}
+        </Box>
       </Box>
       {ready && (
         <Box flexDirection="column" marginTop={1}>

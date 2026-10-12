@@ -24,6 +24,13 @@ const CX = 2
 export const MASCOT_WIDTH = W * 2
 export const MASCOT_HEIGHT = H * 2
 
+/** A desktop text row's height in CSS pixels, near enough. */
+export const ROW_PX = 19
+/** A pane's picture (Clawd at its top left, the header bar to his right) is always this many text rows tall. */
+export const PANE_ROWS = 3
+/** CSS pixels tall every pane picture is: PANE_ROWS text rows. */
+export const PANE_PICTURE_HEIGHT = PANE_ROWS * ROW_PX
+
 export const O = '#D77757' // Claude orange
 export const D = '#141413' // eyes
 const BEZEL = '#3B3B39'

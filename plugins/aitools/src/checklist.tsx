@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { Checklist, ChecklistItem, ViewMode } from '../types'
+import { BLUE, DOING_TEXT, GREEN } from './palette'
 
 /** The checklist tool's short name; the model calls it as `mcp__aitools__checklist`. */
 export const CHECKLIST_TOOL = 'checklist'
@@ -168,17 +169,8 @@ export function finalReplies(rows: readonly Row[]): string[] {
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 const MARKS = { done: '✓', doing: '●', todo: '○' } as const
-/** Done marks green, the step in progress blue (the mod's own shades); steps not started stay dim. */
-export const GREEN = '#6fbe49'
-export const BLUE = '#478487'
+/** Done marks green, the step in progress blue; steps not started stay dim. */
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
-/** The step in progress: a grey between dim and full white, so it stands out without glaring. */
-export const DOING_TEXT = '#b0b0b0'
-/**
- * The bar's dim grey, named: the desktop draws `dimColor` in a pane nearly as light as DOING_TEXT, so pane text that
- * must read as faint as the bar's labels uses this instead.
- */
-export const FAINT_TEXT = '#808080'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
 /** `onClose` clears the checklist: the × at the end of the folded Done line. */
