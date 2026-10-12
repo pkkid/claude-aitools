@@ -3,7 +3,8 @@ export type ToggleKey =
   | 'projectRow'
   | 'fiveHour'
   | 'weekly'
-  | 'resets'
+  | 'fiveHourReset'
+  | 'weeklyReset'
   | 'contextPercent'
   | 'contextTokens'
   | 'threadTokens'
@@ -262,7 +263,10 @@ declare module 'claude-code' {
       /** Bumped every 30 s so countdowns redraw while idle. */
       tick: number
       settings: Settings
+      /** Whether the AI Tool Settings pane is open, so a reload opens it again. */
       isSettingsOpen: boolean
+      /** What the settings pane's last project change came to, when it went wrong; null otherwise. */
+      settingsNote: { text: string; isError: boolean } | null
       /** The whole bar hidden by /aitools; mirrored in $.store so it holds across sessions. */
       isHidden: boolean
       isHandingOff: boolean

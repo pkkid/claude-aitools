@@ -13,19 +13,23 @@ function memoryStore(entries: Record<string, unknown> = {}): KeyStore {
 }
 
 describe('settings', () => {
-  test('eighteen toggles in order, the mascot first and offered only where SVG draws, the project row last', () => {
-    expect(TOGGLES).toHaveLength(18)
-    expect(TOGGLES[0]).toEqual({ key: 'mascot', label: 'Mascot', needsSvg: true })
-    expect(TOGGLES[1]).toEqual({ key: 'label', label: 'Title' })
+  test("nineteen toggles in the settings pane's groups, the mascot first and offered only where SVG draws, the project row after the bar's own", () => {
+    expect(TOGGLES).toHaveLength(19)
+    expect(TOGGLES[0]).toMatchObject({ key: 'mascot', group: 'look', label: 'Show mascot', needsSvg: true })
     expect(TOGGLES.filter(t => t.needsSvg)).toHaveLength(1)
-    expect(TOGGLES[2]?.key).toBe('fiveHour')
-    expect(TOGGLES[7]?.key).toBe('threadTokens')
-    expect(TOGGLES[8]?.key).toBe('lastTurnTokens')
-    expect(TOGGLES[9]?.key).toBe('cacheWarmth')
-    expect(TOGGLES[10]).toEqual({ key: 'coldCost', label: 'Cold-cache cost' })
-    expect(TOGGLES[13]?.key).toBe('threadPercent')
-    expect(TOGGLES[16]?.key).toBe('thresholdColors')
-    expect(TOGGLES[17]).toEqual({ key: 'projectRow', label: 'Project row' })
+    expect(TOGGLES.map(t => t.group)).toEqual([
+      'look', 'look', 'look', 'look', ...Array(15).fill('meters'),
+    ])
+    expect(TOGGLES[3]).toMatchObject({ key: 'projectRow', group: 'look', label: 'Show project row' })
+    expect(TOGGLES.every(t => t.hint.length > 0)).toBe(true)
+    // Every meter's options, together and in order; the bar's own look and the project row are options of no meter.
+    expect([...new Set(TOGGLES.flatMap(t => (t.meter ? [t.meter] : [])))]).toEqual(['5-hour', 'Weekly', 'Context', 'Tokens', 'Cache', 'Thread cost', 'Month', 'Burn rate'])
+    expect(TOGGLES.filter(t => t.meter === 'Context').map(t => t.key)).toEqual(['contextPercent', 'contextTokens'])
+  })
+
+  test("the old Reset countdowns pick carries over to both limits' resets", () => {
+    expect(normalizeSettings({ resets: false })).toMatchObject({ fiveHourReset: false, weeklyReset: false })
+    expect(normalizeSettings({ resets: false, weeklyReset: true })).toMatchObject({ fiveHourReset: false, weeklyReset: true })
   })
 
   test('all default to on', () => {

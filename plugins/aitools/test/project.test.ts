@@ -2,7 +2,6 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   commandDot,
-  displayName,
   expand,
   isServerUp,
   issueInBranch,
@@ -30,14 +29,6 @@ describe('parseGithubRemote', () => {
     expect(parseGithubRemote('https://gitlab.com/pkkid/vowelit.git')).toBeNull()
     expect(parseGithubRemote('git@bitbucket.org:pkkid/vowelit.git')).toBeNull()
     expect(parseGithubRemote('/srv/git/vowelit.git')).toBeNull()
-  })
-})
-
-describe('displayName', () => {
-  test("the repository's name with its first letter capitalized", () => {
-    expect(displayName('claude-mods')).toBe('Claude-mods')
-    expect(displayName('vowelit')).toBe('Vowelit')
-    expect(displayName('API')).toBe('API')
   })
 })
 

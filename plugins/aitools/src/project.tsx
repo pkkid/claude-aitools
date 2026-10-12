@@ -278,11 +278,6 @@ export function renderProjectRow(
   )
 }
 
-/** The row's name for a repository: its name with the first letter capitalized (`claude-mods` → `Claude-mods`). */
-export function displayName(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1)
-}
-
 /** A tool's log pane id. */
 export const logPaneId = (id: string) => `aitools-log-${id}`
 
