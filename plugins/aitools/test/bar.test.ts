@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { packRows, percentText, segments, toneFor, usdPerWeeklyPercent } from '../src/bar'
+import { percentText, segments, toneFor, usdPerWeeklyPercent } from '../src/bar'
 import type { View } from '../src/bar'
 import { DEFAULT_SETTINGS } from '../src/settings'
 import type { Settings } from '../types'
@@ -53,8 +53,10 @@ describe('segments', () => {
     expect(segments(view()).map(s => s.label)).toEqual(['5h', 'wk', 'ctx', 'tok', 'cache', 'thread', 'month', 'limit'])
   })
 
-  test('resets off drops countdowns', () => {
-    expect(texts(view({}, { resets: false })).slice(0, 2)).toEqual(['5h 42%', 'wk 18%'])
+  test('resets off drops countdowns; a reset alone still shows its meter', () => {
+    expect(texts(view({}, { fiveHourReset: false, weeklyReset: false })).slice(0, 2)).toEqual(['5h 42%', 'wk 18%'])
+    expect(texts(view({}, { fiveHour: false, weekly: false })).slice(0, 2)).toEqual(['5h 1h12m', 'wk Thu'])
+    expect(texts(view({}, { fiveHour: false, fiveHourReset: false })).some(t => t.startsWith('5h'))).toBe(false)
   })
 
   test('context tokens off', () => expect(texts(view({}, { contextTokens: false }))).toContain('ctx 31%'))
@@ -202,19 +204,5 @@ describe('token segment', () => {
 
   test('both off, no token segment', () => {
     expect(texts(view({}, { threadTokens: false, lastTurnTokens: false })).some(t => t.startsWith('tok'))).toBe(false)
-  })
-})
-
-describe('packRows', () => {
-  const width = (s: string) => s.length
-
-  test('each row filled until the next item would pass the limit, the gaps counted', () => {
-    expect(packRows(['aaaa', 'bbbb', 'cccc', 'dd'], width, 10, 2)).toEqual([['aaaa', 'bbbb'], ['cccc', 'dd']])
-    expect(packRows(['aaa', 'bbb'], width, 8, 2)).toEqual([['aaa', 'bbb']])
-  })
-
-  test('an item longer than the limit gets a row of its own; nothing gives no rows', () => {
-    expect(packRows(['a', 'bbbbbbbbbbbb', 'c'], width, 10, 2)).toEqual([['a'], ['bbbbbbbbbbbb'], ['c']])
-    expect(packRows([], width)).toEqual([])
   })
 })

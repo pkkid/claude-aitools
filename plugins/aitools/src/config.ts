@@ -11,7 +11,7 @@
  */
 
 import { DEFAULT_HIDE_AFTER, isHideAfter, isShowing, isTeamPick } from './agentdock'
-import { DEFAULT_SETTINGS, normalizeSettings } from './settings'
+import { DEFAULT_SETTINGS, LEGACY_KEYS, normalizeSettings } from './settings'
 import type { AgentShowing, HelperMode, HideAfter, Settings, TeamPick, ViewMode } from '../types'
 
 /** The file's name, in the Claude config folder and in a project's `.claude` folder. */
@@ -145,8 +145,14 @@ export function migrated(raw: Json, stored: StoredSettings): Json {
   for (const key of Object.keys(PATHS) as (keyof Personal)[]) {
     if (key === 'settings') {
       // Each display option on its own, so one added in a later version joins a file that has the rest.
+      // An option that took over an older one's job starts from the file's pick for the older one.
       const show = objectAt(objectAt(next, 'bar'), 'show')
-      const missing = Object.fromEntries(Object.entries(old.settings).filter(([k]) => !(k in show)))
+      const fromFile = normalizeSettings(show)
+      const missing = Object.fromEntries(
+        Object.entries(old.settings)
+          .filter(([k]) => !(k in show))
+          .map(([k, v]) => [k, (LEGACY_KEYS[k as keyof typeof LEGACY_KEYS] ?? '') in show ? fromFile[k as keyof typeof fromFile] : v]),
+      )
       if (Object.keys(missing).length > 0) next = setAt(next, PATHS.settings, { ...show, ...missing })
     } else if (!hasAt(next, PATHS[key])) {
       next = setAt(next, PATHS[key], old[key])

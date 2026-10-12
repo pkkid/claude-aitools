@@ -5,6 +5,7 @@ import { SUBAGENT_NOTE } from '../src/agentdock'
 import { askmeText } from '../src/askme'
 import { NOTE_SHRINK } from '../src/format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from '../src/palette'
+import { SETTINGS_PANE } from '../src/settingspane'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
@@ -40,6 +41,9 @@ const PANE = {
   scroll: { offset: 0, bodyRows: 30 },
   view: {},
 }
+
+/** The AI Tool Settings pane, docked on the desktop. */
+const SETTINGS = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, requestId: SETTINGS_PANE, props: { ...PANE, title: 'AI Tool Settings' } }
 
 /** Answers the band as core does when no plugin beneath draws it: its own drawing, by ref. */
 function coreBand(on: On) {
@@ -1440,11 +1444,9 @@ describe('wiring', () => {
       $.command.run({ command: name, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
 
     async function toggleOption($: Engine, key: string) {
-      const ui = await $.ui.mount(band())
-      await ui.press({ key: 'settings' })
-      await ui.press({ key })
-      await ui.press({ key: 'settings' })
-      await ui.unmount()
+      const pane = await $.ui.mount(SETTINGS)
+      await pane.press({ key })
+      await pane.unmount()
     }
 
     test('no transcript scan while the month, thread tokens and weekly share are all off; turning one on scans', async ($, on) => {
@@ -1927,6 +1929,41 @@ describe('wiring', () => {
     }
     const say = ($: Engine, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
 
+    test('the settings pane writes the name and board into the project file, keeping its tools; a bad URL says why', async ($, on) => {
+      const w = world(on, { [PROJECT]: JSON.stringify({ mine: 'kept', project: { tools: [{ type: 'link', label: 'Docs', url: 'https://x' }] } }) })
+      await start($, on, { usd: 0 })
+      await clock.settle()
+      const pane = await $.ui.mount(SETTINGS)
+      expect(await pane.find({ text: "This project's: /r/.claude/aitools.json" })).toBeDefined()
+      expect(await pane.find({ text: 'Docs. Edit project.tools in the file.' })).toBeDefined()
+      await pane.input({ key: 'project-name', text: 'Vowelit Game', kind: 'submit' })
+      await pane.input({ key: 'project-board', text: 'https://github.com/pkkid/vowelit', kind: 'submit' })
+      expect(await pane.find({ text: /isn't a GitHub Project's URL/ })).toBeDefined()
+      await pane.input({ key: 'project-board', text: 'https://github.com/users/pkkid/projects/1', kind: 'submit' })
+      expect(await pane.find({ text: /isn't a GitHub Project's URL/ })).toBeUndefined()
+      const file = JSON.parse(w.files.get(PROJECT) ?? '{}')
+      expect(file).toEqual({
+        mine: 'kept',
+        project: { tools: [{ type: 'link', label: 'Docs', url: 'https://x' }], name: 'Vowelit Game', board: 'https://github.com/users/pkkid/projects/1' },
+      })
+      expect((await rowText($))['project-name']).toBe('Vowelit Game')
+      // Off in this repository: the row goes, and the file says so.
+      await pane.press({ key: 'project-enabled' })
+      expect(JSON.parse(w.files.get(PROJECT) ?? '{}').project.enabled).toBe(false)
+      expect(await rowText($)).toEqual({})
+      await pane.press({ key: 'project-enabled' })
+      expect(JSON.parse(w.files.get(PROJECT) ?? '{}').project.enabled).toBeUndefined()
+      expect((await rowText($))['project-name']).toBe('Vowelit Game')
+      // The global one hides it in every project, and leaves this project's own as it was.
+      await pane.press({ key: 'projectRow' })
+      expect(JSON.parse(w.files.get(GLOBAL) ?? '{}').bar.show.projectRow).toBe(false)
+      expect(await rowText($)).toEqual({})
+      expect(await pane.find({ text: /Show project row is off in every project/ })).toBeDefined()
+      expect(await pane.find({ text: 'Saved for vowelit only' })).toBeDefined()
+      await pane.unmount()
+      expect(w.files.has(GLOBAL)).toBe(true)
+    })
+
     test('outside a GitHub repository there is no row', async ($, on) => {
       const w = world(on)
       w.remote = 'https://gitlab.com/pkkid/vowelit.git'
@@ -1941,7 +1978,7 @@ describe('wiring', () => {
       await say($, 'Please fix #42 today')
       await say($, 'and #50 too')
       const row = await rowText($)
-      expect(row['project-name']).toBe('Vowelit')
+      expect(row['project-name']).toBe('vowelit')
       expect(row['project-board']).toBe('Project')
       expect(row['project-issue']).toBe('#42 Issue 42 title')
       const ui = await $.ui.mount(band())
@@ -2022,7 +2059,7 @@ describe('wiring', () => {
       expect(await rowText($)).toEqual({})
       expect(JSON.parse(w.files.get(GLOBAL) ?? '{}').bar.show.projectRow).toBe(false)
       expect((await run('project')).text).toBe('Project row shown.')
-      expect((await rowText($))['project-name']).toBe('Vowelit')
+      expect((await rowText($))['project-name']).toBe('vowelit')
     })
 
     describe('Project pane', () => {
@@ -2137,10 +2174,9 @@ describe('wiring', () => {
     test('the options write the global file only, keeping what else it holds', async ($, on) => {
       const { map } = disk(on, { [GLOBAL]: JSON.stringify({ mine: 'kept', bar: { show: { label: true } } }) })
       await start($, on, { usd: 0 })
-      const ui = await $.ui.mount(band())
-      await ui.press({ key: 'settings' })
-      await ui.press({ key: 'label' })
-      await ui.unmount()
+      const pane = await $.ui.mount(SETTINGS)
+      await pane.press({ key: 'label' })
+      await pane.unmount()
       expect(saved(map).bar.show.label).toBe(false)
       expect(saved(map).mine).toBe('kept')
       expect([...map.keys()]).toEqual([GLOBAL])

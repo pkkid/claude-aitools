@@ -45,15 +45,17 @@ export const ZZZ = '#8E96B8'
 const SPARK = '#F2C14E'
 const RED = '#E0524C'
 const SWEAT = '#7CC4E8'
+const HAT = '#F2C14E'
+const HAT_DARK = '#C9922F'
 
 type Eyes = 'open' | 'half' | 'closed' | 'squint' | 'happy' | 'wide'
 type Arms = 'side' | 'typeA' | 'typeB' | 'scratchA' | 'scratchB' | 'up' | 'rest' | 'waveA' | 'waveB' | 'hold'
 
 /**
  * One frame of Clawd: body offset (y up is negative), step aside (x), legs (false while sitting, A or B mid-stride),
- * eyes (with a look offset) and arms.
+ * eyes (with a look offset), arms, and a hard hat (the settings pane's).
  */
-type Posture = { y?: number; x?: number; legs?: boolean | 'A' | 'B'; eyes: Eyes; look?: number; lookY?: number; arms: Arms }
+type Posture = { y?: number; x?: number; legs?: boolean | 'A' | 'B'; eyes: Eyes; look?: number; lookY?: number; arms: Arms; hat?: true }
 
 export const rect = (x: number, y: number, w: number, h: number, c: string, extra = '') =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}"${extra}/>`
@@ -114,6 +116,10 @@ export function figure(p: Posture): string {
     s += [8, 10, 13, 15].map((x, i) => rect(x, 10 + y, 1, p.legs === (i % 2 === 0 ? 'A' : 'B') ? 1 : 2, O)).join('')
   }
   s += arms(p.arms, 7 + y) + eyes(p, 6 + y)
+  if (p.hat) {
+    // A hard hat: its dome and a ridge down the middle above the body, the brim a pixel wider each side.
+    s += rect(9, 1 + y, 6, 1, HAT) + rect(8, 2 + y, 8, 2, HAT) + rect(6, 4 + y, 12, 1, HAT) + rect(11, 1 + y, 2, 3, HAT_DARK)
+  }
 
   return `<g transform="translate(${CX + (p.x ?? 0)} 0)">${s}</g>`
 }

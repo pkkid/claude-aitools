@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { DOING_TEXT } from '../src/palette'
+import { BG, DOING_TEXT } from '../src/palette'
+import { SETTINGS_PANE } from '../src/settingspane'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
@@ -26,11 +27,39 @@ function coreBand(on: On) {
   on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine' as const, ref: 0 }))
 }
 
+/** The AI Tool Settings pane as a docked pane receives it. */
+function settingsPane(surface: (typeof SURFACES)[number]) {
+  return {
+    plugin: 'aitools',
+    surface,
+    component: 'Pane' as const,
+    requestId: SETTINGS_PANE,
+    props: { title: 'AI Tool Settings', isFocused: false, bodyColumns: 100, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  }
+}
+
+/** Answers `$.ui.open` and `$.ui.close` as the engine would; returns the ids open now. */
+function mockPanes(on: On): Set<string> {
+  const open = new Set<string>()
+  on('ui.open', (_, e) => {
+    open.add(e.id)
+    return { value: { isPlaced: true as const } }
+  })
+  on('ui.close', (_, e) => {
+    open.delete(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
+
+  return open
+}
+
 describe('AbovePrompt band', () => {
-  test('settings open, toggle and close', async ($, on) => {
+  test('⁝ opens the AI Tool Settings pane, whose options change the bar; ⁝ again closes it', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
+    const open = mockPanes(on)
     for (const surface of SURFACES) {
       const ui = await $.ui.mount(band(surface))
       // The terminal names the menus in words: it paints a bare 🛠 wider than it lays it out.
@@ -39,48 +68,60 @@ describe('AbovePrompt band', () => {
       expect(await ui.find({ text: /wk/ })).toBeDefined()
 
       await ui.press({ key: 'settings' })
-      expect(await ui.find({ key: 'weekly' })).toBeDefined()
-      expect(await ui.find({ text: /wk/ })).toBeDefined()
-
-      await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe('○ Weekly usage')
-
-      await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe('● Weekly usage')
-      await ui.press({ key: 'weekly' })
-      expect(await ui.find({ text: /wk/ })).toBeUndefined()
-
-      await ui.press({ key: 'settings' })
+      expect(open.has(SETTINGS_PANE)).toBe(true)
+      // Nothing opens above the bar any more.
       expect(await ui.find({ key: 'weekly' })).toBeUndefined()
-      expect(await ui.find({ key: 'settings' })).toBeDefined()
+
+      const pane = await $.ui.mount(settingsPane(surface))
+      expect((await pane.find({ key: 'weekly' }))?.text).toBe('● Percent')
+      await pane.press({ key: 'weekly' })
+      expect((await pane.find({ key: 'weekly' }))?.text).toBe('○ Percent')
+      // The weekly meter shows while either of its options is on.
+      expect(await ui.find({ text: /wk/ })).toBeDefined()
+      await pane.press({ key: 'weeklyReset' })
+      expect(await ui.find({ text: /wk/ })).toBeUndefined()
+      await pane.press({ key: 'weekly' })
+      await pane.press({ key: 'weeklyReset' })
+      expect(await ui.find({ text: /wk/ })).toBeDefined()
+      await pane.unmount()
 
       await ui.press({ key: 'settings' })
-      await ui.press({ key: 'weekly' })
-      await ui.press({ key: 'settings' })
+      expect(open.has(SETTINGS_PANE)).toBe(false)
       await ui.unmount()
     }
   })
 
-  test('the display options wrap at about 80 characters a row; Mascot leads the first row, on the desktop only', async ($, on) => {
+  test('the pane lists every option under its ribbon and group; Mascot on the desktop only', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
-    const counts: Record<string, (number | undefined)[]> = {}
     for (const surface of SURFACES) {
-      const ui = await $.ui.mount(band(surface))
-      await ui.press({ key: 'settings' })
-      const rows = []
-      for (let i = 0; (await ui.find({ key: `settings-row-${i}` })) !== undefined; i++) {
-        rows.push(await ui.find({ key: `settings-row-${i}` }))
+      const pane = await $.ui.mount(settingsPane(surface))
+      const text = (await pane.findAll({ type: 'Text' })).map(t => t.text)
+      for (const heading of ['Global Settings', 'Meters', 'Project Settings']) {
+        expect(text).toContain(heading)
       }
-      counts[surface] = rows.map(r => r?.children.length)
-      expect((await ui.find({ key: 'label' }))?.text).toBe('● Title')
-      expect((await ui.find({ key: 'mascot' })) !== undefined).toBe(surface === 'desktop')
-      expect((await ui.find({ key: 'settings-row-0' }))?.text.startsWith('● Mascot')).toBe(surface === 'desktop')
-      await ui.press({ key: 'settings' })
-      await ui.unmount()
+      expect((await pane.find({ key: 'label' }))?.text).toBe('● Show title')
+      // The global Show project row sits with the bar's own options; outside a repository Project Settings has nothing to
+      // save. Each heading says where its settings go.
+      expect((await pane.find({ key: 'projectRow' }))?.text).toBe('● Show project row')
+      expect(await pane.find({ key: 'project-enabled' })).toBeUndefined()
+      expect(text).toContain('May be overridden by project settings')
+      expect(text).toContain('Saved for each project')
+      expect((await pane.find({ key: 'mascot' })) !== undefined).toBe(surface === 'desktop')
+      expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe(surface === 'desktop' ? 'Clawd in a hard hat, turning a cog with a wrench' : undefined)
+      // Each meter is one row: its name, then its options beside it.
+      const meterRow = await pane.find({ key: 'meter-Context' })
+      expect(meterRow?.text).toContain('Context')
+      expect((await pane.find({ key: 'meter-Thread cost' }))?.text).toContain('● Weekly share')
+      expect(await pane.find({ key: 'meter-Month' })).toBeDefined()
+      expect(meterRow?.text).toContain('● Percent')
+      expect(meterRow?.text).toContain('● Tokens')
+      expect(await pane.find({ key: 'row-contextPercent' })).toBeUndefined()
+      // Each section's heading sits on a band of its own.
+      expect((await pane.find({ key: 'heading-project' }))?.props.backgroundColor).toBe(BG.bg1)
+      await pane.unmount()
     }
-    expect(counts).toEqual({ terminal: [5, 4, 4, 4], desktop: [6, 4, 4, 4] })
   })
 
   test('the mascot stands at the start of the bar on the desktop only, and Mascot hides him', async ($, on) => {
@@ -98,10 +139,11 @@ describe('AbovePrompt band', () => {
     expect(art?.props.height).toBe(20)
     expect(art?.props.isInteractive).toBeUndefined()
     expect(String(art?.props.source)).toMatch(/^<svg [\s\S]*<\/svg>$/)
-    await ui.press({ key: 'settings' })
-    expect((await ui.find({ key: 'mascot' }))?.text).toBe('● Mascot')
-    await ui.press({ key: 'mascot' })
-    expect((await ui.find({ key: 'mascot' }))?.text).toBe('○ Mascot')
+    const pane = await $.ui.mount(settingsPane('desktop'))
+    expect((await pane.find({ key: 'mascot' }))?.text).toBe('● Show mascot')
+    await pane.press({ key: 'mascot' })
+    expect((await pane.find({ key: 'mascot' }))?.text).toBe('○ Show mascot')
+    await pane.unmount()
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     await ui.unmount()
   })
@@ -141,21 +183,16 @@ describe('AbovePrompt band', () => {
     await ui.unmount()
   })
 
-  test('opening one menu closes the other', async ($, on) => {
+  test('⁝ closes the 🛠 menu as it opens the settings pane', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
+    mockPanes(on)
     const ui = await $.ui.mount(band('desktop'))
     await ui.press({ key: 'tools' })
     expect(await ui.find({ key: 'handoff' })).toBeDefined()
-
     await ui.press({ key: 'settings' })
-    expect(await ui.find({ key: 'weekly' })).toBeDefined()
     expect(await ui.find({ key: 'handoff' })).toBeUndefined()
-
-    await ui.press({ key: 'tools' })
-    expect(await ui.find({ key: 'handoff' })).toBeDefined()
-    expect(await ui.find({ key: 'weekly' })).toBeUndefined()
     await ui.unmount()
   })
 
@@ -167,9 +204,10 @@ describe('AbovePrompt band', () => {
     await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount(band('desktop'))
     expect(await ui.find({ key: 'tools' })).toBeDefined()
-    await ui.press({ key: 'settings' })
-    expect(await ui.find({ text: /Tools menu/ })).toBeUndefined()
     await ui.unmount()
+    const pane = await $.ui.mount(settingsPane('desktop'))
+    expect(await pane.find({ text: /Tools menu/ })).toBeUndefined()
+    await pane.unmount()
   })
 
   test('yields to a survey', async ($, on) => {

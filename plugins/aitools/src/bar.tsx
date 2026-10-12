@@ -7,8 +7,7 @@ import { VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
 import { MASCOT_HEIGHT, MASCOT_WIDTH } from './mascot'
 import { DOING_TEXT, RED, YELLOW } from './palette'
-import { TOGGLES } from './settings'
-import type { MonthTotal, Settings, Snapshot, ToggleKey, ViewMode } from '../types'
+import type { LimitWindow, MonthTotal, Settings, Snapshot, ViewMode } from '../types'
 
 export type View = {
   snapshot: Snapshot | null
@@ -159,13 +158,19 @@ export function segments(view: View): Segment[] {
   const context = snapshot?.context
   const pct = (n: number | undefined) => (n === undefined ? DASH : `${Math.round(n)}%`)
 
-  if (on.fiveHour) {
-    const reset = on.resets && fiveHour?.resetsAt ? `, ${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
-    segs.push({ key: 'fiveHour', label: '5h', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on) })
+  // A limit's meter shows while its percent or its reset is on: `5h 42%, 1h12m`, `5h 42%`, `5h 1h12m`.
+  const limit = (window: LimitWindow | undefined, showPct: boolean, showReset: boolean, reset: (at: string) => string) => {
+    const parts = showPct ? [pct(window?.percentUsed)] : []
+    if (showReset && window?.resetsAt) parts.push(reset(window.resetsAt))
+    return parts.length > 0 ? parts.join(', ') : DASH
   }
-  if (on.weekly) {
-    const reset = on.resets && weekly?.resetsAt ? `, ${weeklyReset(weekly.resetsAt, now)}` : ''
-    segs.push({ key: 'weekly', label: 'wk', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on) })
+  if (on.fiveHour || on.fiveHourReset) {
+    const text = limit(fiveHour, on.fiveHour, on.fiveHourReset, at => duration(Date.parse(at) - now))
+    segs.push({ key: 'fiveHour', label: '5h', text: `5h ${text}`, tone: toneFor(fiveHour?.percentUsed, on) })
+  }
+  if (on.weekly || on.weeklyReset) {
+    const text = limit(weekly, on.weekly, on.weeklyReset, at => weeklyReset(at, now))
+    segs.push({ key: 'weekly', label: 'wk', text: `wk ${text}`, tone: toneFor(weekly?.percentUsed, on) })
   }
   if (on.contextPercent || on.contextTokens) {
     const parts: string[] = []
@@ -209,33 +214,6 @@ const VIEWS = [
   { mode: 'clean', label: VIEW_NAMES.clean },
 ] as const
 
-/** About how many characters of labels the ⁝ menu puts on one row, the space between them counted. */
-export const SETTINGS_ROW_CHARS = 80
-/** The space between two options on a row. */
-const SETTINGS_GAP = 2
-
-/**
- * Options packed into rows in order, each row filled until the next label would take it past `max` characters (the
- * gap between labels counted); a label longer than `max` gets a row of its own.
- */
-export function packRows<T>(items: readonly T[], width: (item: T) => number, max = SETTINGS_ROW_CHARS, gap = SETTINGS_GAP): T[][] {
-  const rows: T[][] = []
-  let used = 0
-  for (const item of items) {
-    const w = width(item)
-    const row = rows.at(-1)
-    if (row !== undefined && used + gap + w <= max) {
-      row.push(item)
-      used += gap + w
-    } else {
-      rows.push([item])
-      used = w
-    }
-  }
-
-  return rows
-}
-
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
 const QUIET = { plain: true, dimColor: true } as const
 
@@ -258,7 +236,6 @@ export function renderBar(
     isWorking: boolean
     isHandingOff: boolean
     isToolsOpen: boolean
-    isSettingsOpen: boolean
     /** Whether Claude's last reply asks something it never put to the person as pop-up choices. */
     isAskable: boolean
     /** Whether /keepwarm is keeping the cache warm: the bar shows its marker. */
@@ -278,8 +255,8 @@ export function renderBar(
     openDock(): void
     openWorktrees(): void
     openProject(): void
+    /** ⁝: opens or closes the AI Tool Settings pane. */
     toggleSettings(): void
-    toggle(key: ToggleKey): void
   },
   checklist: ReturnType<typeof renderChecklist> = null,
   /** The project row, drawn right under the bar; null outside a GitHub repository. */
@@ -335,25 +312,7 @@ export function renderBar(
   )
 
   let menu = null
-  if (flags.isSettingsOpen) {
-    // Rows of about SETTINGS_ROW_CHARS characters, in order; a narrow band still wraps a row further. The desktop's
-    // own options (Mascot) lead the first row, on top of what it holds, so both surfaces wrap at the same options.
-    const rows = packRows(TOGGLES.filter(t => !t.needsSvg), t => Array.from(`● ${t.label}`).length)
-    if (Svg) {
-      rows[0] = [...TOGGLES.filter(t => t.needsSvg), ...(rows[0] ?? [])]
-    }
-    menu = (
-      <Box flexDirection="column">
-        {rows.map((row, i) => (
-          <Box key={`settings-row-${i}`} flexDirection="row" flexWrap="wrap" justifyContent="flex-end" columnGap={SETTINGS_GAP}>
-            {row.map(t => (
-              <Button key={t.key} label={`${view.settings[t.key] ? '●' : '○'} ${t.label}`} {...QUIET} onPress={() => on.toggle(t.key)} />
-            ))}
-          </Box>
-        ))}
-      </Box>
-    )
-  } else if (flags.isToolsOpen) {
+  if (flags.isToolsOpen) {
     menu = (
       <Box flexDirection="row" justifyContent="flex-end" gap={gap}>
         <Button
@@ -388,7 +347,7 @@ export function renderBar(
     return bars
   }
 
-  // An open menu (🛠 or ⁝) sits above the bar and the checklist below it, so the bar itself never shifts.
+  // The open 🛠 menu sits above the bar and the checklist below it, so the bar itself never shifts.
   return (
     <Box flexDirection="column" gap={1}>
       {menu}

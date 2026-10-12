@@ -50,7 +50,6 @@ import {
   expand,
   issueInBranch,
   issueInPrompt,
-  displayName,
   logPaneId,
   parseGithubRemote,
   projectFrom,
@@ -103,6 +102,8 @@ import {
 } from '../src/worktrees'
 import type { PrFacts, Removal, WorktreeFacts } from '../src/worktrees'
 import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
+import { SETTINGS_PANE, SETTINGS_TITLE, boardProblem, homeRelative, renderSettings, withProject } from '../src/settingspane'
+import type { ProjectChange } from '../src/settingspane'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
 import type { BoardData, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
@@ -159,6 +160,7 @@ const isBoardOpen = atom({ plugin: 'aitools', key: 'isBoardOpen' } as const, fal
 const board = atom({ plugin: 'aitools', key: 'board' } as const, { status: 'loading' })
 const boardFilter = atom({ plugin: 'aitools', key: 'boardFilter' } as const, 'open')
 const isBoardReading = atom({ plugin: 'aitools', key: 'isBoardReading' } as const, false)
+const settingsNote = atom({ plugin: 'aitools', key: 'settingsNote' } as const, null)
 
 const HANDOFF_PANE = 'handoff'
 const NOTES_PANE = 'notes'
@@ -855,17 +857,60 @@ function drawNothing($: EngineInterface, e: Parameters<EngineInterface['ui']['re
   return <Box key="aitools-hidden" display="none" />
 }
 
-/** Opens or closes one menu above the bar; opening it closes the other, so only one row shows. */
-async function toggleMenu($: EngineInterface, menu: 'tools' | 'settings'): Promise<void> {
-  if (menu === 'tools') {
-    if (await update($, isToolsOpen, open => !open)) {
-      await update($, isSettingsOpen, () => false)
-    }
-  } else if (await update($, isSettingsOpen, open => !open)) {
-    await update($, isToolsOpen, () => false)
-    // Opening the options shows the file as it stands, hand edits included.
-    await loadGlobal($)
+/** Opens or closes the 🛠 menu above the bar. */
+async function toggleMenu($: EngineInterface): Promise<void> {
+  await update($, isToolsOpen, open => !open)
+}
+
+/** ⁝: opens the AI Tool Settings pane, both files read first so it shows them as they stand, or closes it. */
+async function toggleSettingsPane($: EngineInterface): Promise<void> {
+  await update($, isToolsOpen, () => false)
+  if (await read($, isSettingsOpen)) {
+    await update($, isSettingsOpen, () => false)
+    await $.ui.close({ id: SETTINGS_PANE })
+    return
   }
+  await reloadConfigs($)
+  await update($, settingsNote, () => null)
+  await update($, isSettingsOpen, () => true)
+  await $.ui.open({ id: SETTINGS_PANE, title: SETTINGS_TITLE })
+}
+
+/**
+ * The settings pane's project fields, written to the project file the row reads (the checkout's when there is none
+ * yet), keeping everything else in it; then read back, so the row and the pane follow. A refused URL or a file that
+ * can't be read or written says why in the pane instead.
+ */
+async function saveProject($: EngineInterface, change: ProjectChange): Promise<void> {
+  const repo = await read($, githubRepo)
+  if (repo === null) {
+    return
+  }
+  const fail = (text: string) => update($, settingsNote, () => ({ text, isError: true }))
+  const problem = typeof change.board === 'string' ? boardProblem(change.board) : null
+  if (problem !== null) {
+    await fail(problem)
+    return
+  }
+  const path = projectPath ?? `${repo.checkout}/.claude/${CONFIG_FILE}`
+  const text = await readText($, path)
+  let raw: Json = {}
+  if (text !== null) {
+    const parsed = parseConfig(text)
+    if ('error' in parsed) {
+      await fail(`${path} isn't valid JSON (${parsed.error}), so it was left as it is.`)
+      return
+    }
+    raw = parsed.value
+  }
+  try {
+    await $.fs.write(path, configText(withProject(raw, change)))
+  } catch (err) {
+    await fail(`Couldn't save ${path}: ${errorText(err)}`)
+    return
+  }
+  await update($, settingsNote, () => null)
+  await loadProject($)
 }
 
 /** Every 30 s: countdowns redraw while the bar shows; the mascot may fall asleep. */
@@ -1046,7 +1091,6 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isWorking,
     isHandingOff: await read($, isHandingOff),
     isToolsOpen: await read($, isToolsOpen),
-    isSettingsOpen: await read($, isSettingsOpen),
     isAskable: await read($, isAskable),
     isKeepingWarm: (await read($, keepWarm)) !== null,
     viewMode: await read($, viewMode),
@@ -1062,16 +1106,15 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
   const projectRow = await drawProjectRow($, el, el.Svg ? 0 : 2)
 
   return renderBar(el, view, flags, {
-    toggleTools: () => void toggleMenu($, 'tools'),
+    toggleTools: () => void toggleMenu($),
     askme: () => void askFromBar($, isWorking),
     handoff: () => void showHandoff($),
     openNotes: () => void openNotes($),
-    toggleSettings: () => void toggleMenu($, 'settings'),
+    toggleSettings: () => void toggleSettingsPane($),
     setView: mode => void setView($, mode),
     openDock: () => void openDock($),
     openWorktrees: () => void openWorktrees($),
     openProject: () => void openProject($),
-    toggle: key => void toggleSetting($, key),
   }, list, projectRow)
 }
 
@@ -2093,7 +2136,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
     el,
     {
       repo,
-      name: config?.name ?? displayName(repo.name),
+      name: config?.name ?? repo.name,
       boardUrl: await read($, boardUrl),
       issue: issueNumber === null ? null : { number: issueNumber, title: title?.number === issueNumber ? title.title : null },
       tools: config?.tools ?? [],
@@ -2207,6 +2250,10 @@ export const register: Register = on => {
     // The Project pane too: it opens again, on the stored read while that is fresh.
     if (await read($, isBoardOpen)) {
       await setBoardOpen($, true)
+    }
+    // And the settings pane.
+    if ((await read($, isSettingsOpen)) && !(await $.ui.panes()).some(p => p.id === SETTINGS_PANE)) {
+      await $.ui.open({ id: SETTINGS_PANE, title: SETTINGS_TITLE })
     }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     await $.command.register({ name: 'keepwarm', description: 'Keep the prompt cache warm while you are away (6h bare)', argumentHint: '[6h|90m|off|status|help]' })
@@ -2529,6 +2576,28 @@ export const register: Register = on => {
     })
   })
 
+  on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => {
+    const el = $.ui.resolve(e)
+    // Clawd is SVG: the terminal never gets him, whatever its table holds. Mobile draws no fields.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+    const Input = 'Input' in el ? el.Input : undefined
+    const home = await $.env.get('HOME').catch(() => undefined)
+    const repo = await read($, githubRepo)
+    const view = {
+      settings: normalizeSettings(await read($, settings)),
+      globalFile: homeRelative(globalPath ?? `${await configDir($)}/${CONFIG_FILE}`, home),
+      repo,
+      project: await read($, projectConfig),
+      projectFile: repo === null ? null : homeRelative(projectPath ?? `${repo.checkout}/.claude/${CONFIG_FILE}`, home),
+      note: await read($, settingsNote),
+    }
+
+    return renderSettings({ Box: el.Box, Text: el.Text, Button: el.Button, Input, Svg }, view, {
+      toggle: key => void toggleSetting($, key),
+      setProject: change => void saveProject($, change),
+    })
+  })
+
   on('ui.render', { component: 'Pane', requestId: PROJECT_PANE }, async ($, e) => {
     // The 30-second tick keeps `updated 3m ago` current.
     await read($, tick)
@@ -2619,6 +2688,9 @@ export const register: Register = on => {
   })
 
   on('ui.close', async ($, e, next) => {
+    if (e.id === SETTINGS_PANE && e.origin.kind === 'person') {
+      await update($, isSettingsOpen, () => false)
+    }
     if (e.id === NOTES_PANE && e.origin.kind === 'person') {
       await update($, isNotesOpen, () => false)
     }

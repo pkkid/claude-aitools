@@ -52,6 +52,11 @@ describe('withPersonal', () => {
 })
 
 describe('migrated', () => {
+  test("a file from before the limits' resets were apart gives both its Reset countdowns pick", () => {
+    const filled = migrated({ bar: { show: { resets: false } } }, {})
+    expect(filled.bar).toMatchObject({ show: { fiveHourReset: false, weeklyReset: false } })
+  })
+
   test("a first run takes the store's settings, and fills the rest with defaults", () => {
     const filled = migrated({}, { settings: { label: false }, isHidden: true, viewMode: 'task', agentTeam: 10 })
     expect(personalFrom(filled)).toEqual({ ...PERSONAL_DEFAULTS, settings: { ...DEFAULT_SETTINGS, label: false }, isHidden: true, view: 'task', team: 10 })

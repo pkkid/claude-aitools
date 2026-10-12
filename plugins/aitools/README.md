@@ -33,16 +33,56 @@ sessions. `/handoff` works either way.
 
 ## Settings
 
-Press **⁝** to open the options above the bar, wrapped at about 80 characters a row, and toggle any of: (in the desktop Code tab only,
-leading the first row) the mascot, the title, 5-hour usage,
-weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, cold-cache cost,
-thread cost, last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors, and last, the project row. The **🛠** button always shows.
-Changes show in the bar right away and are saved across sessions, in the settings file (below). An option that is off does no work in the
+Press **⁝** (`opts` in the terminal) to open the **AI Tool Settings** pane; press it again, or the pane's own close
+mark, to close it. Opening it closes the **🛠** menu. Clawd stands at its top left in a hard hat, cranking a cog (on the
+desktop), beside the files the settings are saved in. Every option, or every meter with its options, gets a row,
+in two sections:
+
+```
+Global Settings  May be overridden by project settings
+● Show mascot       Clawd, acting out what Claude is doing
+● Show title        AI Tools at the start of the bar
+● Threshold colors  Yellow from 70%, red from 90%; a cache about to go cold
+● Show project row  A second row: repo, board, issue and tools, in every project
+Meters
+  5-hour            ● Percent  ● Reset  5h 42%, 1h12m
+  Weekly            ● Percent  ● Reset  wk 18%, Thu
+  Context           ● Percent  ● Tokens  ctx 31% 62k/200k
+  Tokens            ● Thread  ● Last turn  tok 1.3M (+48k)
+  Cache             ● Time left  ● Cold cost  cache 42m, $0.50
+  Thread cost       ● Thread  ● Last turn  ● Weekly share
+                    thread $3.12 (+$0.41) ~2.1% wk
+  Month             ● Cost  month $184.20
+  Burn rate         ● Warning  limit ~3:40pm
+
+Project Settings  Saved for vowelit only
+● Show project row  The row in vowelit
+  Name              [Vowelit                                   ]
+                    In place of the repo's name
+● Board link        The GitHub Project board, on the row
+  Board URL         [https://github.com/users/pkkid/projects/1 ]
+  Tools             Server · Test · Docs. Edit project.tools in the file.
+```
+
+**Global Settings** holds the bar's display options. First the bar's own: show mascot (offered on the
+desktop only), show title, threshold colors and show project row (in every project). Then each meter in the bar is one row, its options beside its name and
+a sample of it after them, all under **Meters** in the order the bar shows them: 5-hour, weekly, context, tokens, cache,
+thread cost, month and burn rate. A meter shows while any of its options is on. The **🛠** button always
+shows.
+
+Global Settings are saved for all your projects, in your settings file. **Project Settings** are saved for the
+project, in its own file, and show only in a GitHub repository: **Show project row** (whether the row shows here,
+when the global one is on too),
+the name it shows, and its board (off, or its URL). Each heading says where its settings go. Type a name or URL and
+press Enter to save it; an empty field goes back to the repository's name or the board looked up for it, and a URL
+that isn't a GitHub Project's is refused with a line saying why. These are written to the project
+file (see [Project row](#project-row)); its tools are edited in the file itself.
+
+Changes show in the bar right away and are saved across sessions. An option that is off does no work in the
 background: the transcript scan runs only for monthly cost, thread tokens or thread cost %; the cost lookups only for
 the cost options; the mascot follows nothing while hidden. (Request times are kept either way: `/keepwarm` needs them.) Turned back on, an
-option catches up at once, except the burn-rate projection, which needs fresh samples (a few responses) to project
-from. Hiding the bar with `/aitools off` stops all of it. Press **⁝** again to close it; opening it closes the
-**🛠** menu, and the other way round.
+option catches up at once, except the burn-rate warning, which needs fresh samples (a few responses) to project
+from. Hiding the bar with `/aitools off` stops all of it.
 
 ### The settings file
 
@@ -64,8 +104,9 @@ dim line in the chat says what's wrong.
 }
 ```
 
-A write reads the file again first and changes only its own keys, so anything else in it stays. The mod never writes
-a project's own `.claude/aitools.json`; that one is yours (see [Project row](#project-row)).
+A write reads the file again first and changes only its own keys, so anything else in it stays. The display options
+are always written here; a project's own `.claude/aitools.json` gets only what you set under Project Settings (see
+[Project row](#project-row)).
 
 ## Mascot
 
@@ -84,7 +125,7 @@ laptop or paper, sits down to sleep, jolts awake.
 | Oops | A tool call fails or is refused, or a turn is interrupted or fails (a few seconds) |
 | Sleeping | Standing idle for 5 minutes; your next prompt wakes him |
 
-He is SVG, so he never shows in the terminal, and **Mascot** in the **⁝** menu (on by default) is offered on the
+He is SVG, so he never shows in the terminal, and **Mascot** in the settings pane (on by default) is offered on the
 desktop only.
 
 ## Handoff
@@ -331,7 +372,7 @@ Vowelit  Project  #42 Login fails on Safari                          ● Running
 
 On the left, each opening in your browser:
 
-- **The repository's name**, its first letter capitalized, from the main checkout's GitHub remote (`origin` first),
+- **The repository's name**, as GitHub has it, from the main checkout's GitHub remote (`origin` first),
   opening the repository. `name` in the project file shows a name of your own instead, as written.
 - **Project**: the repository's GitHub Project board, when exactly one is linked to it. It's looked up once a day
   through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
@@ -341,14 +382,17 @@ On the left, each opening in your browser:
   `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
   from GitHub, one call per issue, kept.
 
-Outside a GitHub repository there is no row. **Project row** in the **⁝** options hides it in every project (saved
-to the settings file); `/aitools project on|off` does the same from the prompt.
+Outside a GitHub repository there is no row. **Show project row** under the settings pane's Global Settings hides it
+in every project (saved to the settings file), as `/aitools project on|off` does from the prompt; the one under
+Project Settings hides it in this project only (saved to the project file).
 
 ### The project file
 
 `<repo>/.claude/aitools.json` holds the row's settings and the tools on its right. Commit it to share the tools, or
-gitignore it; it's yours either way, and the mod never writes it. A worktree reads its own copy, else the main
-checkout's. Changes take effect within 30 seconds, or at once when Claude edits it.
+gitignore it; it's yours either way. The mod writes it only when you change `enabled`, `name` or `board` in the
+settings pane, and then only those keys, keeping the rest as it was (a file with no copy yet is made in the session's
+checkout). A worktree reads its own copy, else the main checkout's. Changes take effect within 30 seconds, or at once
+when Claude edits it.
 
 ```json
 {
