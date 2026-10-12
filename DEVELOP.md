@@ -1,10 +1,10 @@
-# Developing claude-mods
+# Developing claude-aitools
 
 To install from a local checkout instead of GitHub:
 
 ```
-/plugin marketplace add ~/Projects/claude-mods
-/plugin install aitools@claude-mods
+/plugin marketplace add ~/Projects/claude-aitools
+/plugin install aitools@claude-aitools
 ```
 
 Or load mods straight from this checkout, with hot reload, by adding to the `env` block of `~/.claude/settings.json`
@@ -13,7 +13,7 @@ Or load mods straight from this checkout, with hot reload, by adding to the `env
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/claude-mods/plugins/aitools",
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/claude-aitools/plugins/aitools",
     "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
   }
 }

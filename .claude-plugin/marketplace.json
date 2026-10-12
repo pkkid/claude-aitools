@@ -1,6 +1,6 @@
 {
-  "name": "claude-mods",
-  "description": "Personal Claude Code mods: small function-hook plugins for the terminal and the desktop Code tab",
+  "name": "claude-aitools",
+  "description": "AI Tools for Claude Code: a usage, cost and context bar with tool panels, for the terminal and the desktop Code tab",
   "owner": {
     "name": "Michael Shepanski"
   },

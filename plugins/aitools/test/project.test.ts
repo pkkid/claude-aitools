@@ -22,7 +22,7 @@ describe('parseGithubRemote', () => {
     expect(parseGithubRemote('https://token@github.com/pkkid/vowelit.git')).toEqual(repo)
     expect(parseGithubRemote('git@github.com:pkkid/vowelit.git')).toEqual(repo)
     expect(parseGithubRemote('ssh://git@github.com/pkkid/vowelit.git')).toEqual(repo)
-    expect(parseGithubRemote('https://github.com/pkkid/claude-mods.git')).toEqual({ owner: 'pkkid', name: 'claude-mods' })
+    expect(parseGithubRemote('https://github.com/pkkid/claude-aitools.git')).toEqual({ owner: 'pkkid', name: 'claude-aitools' })
   })
 
   test('anything not on github.com is none', () => {

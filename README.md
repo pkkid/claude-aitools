@@ -1,4 +1,4 @@
-# claude-mods
+# claude-aitools
 
 **AI Tools** is a mod for [Claude Code](https://claude.com/claude-code) that adds one slim ribbon above the prompt.
 At a glance it shows how much of your Claude subscription you have used, how full the conversation is, and what the
@@ -116,8 +116,8 @@ The full reference for every option is in the [mod's own README](plugins/aitools
 terminal (Terminal on macOS, PowerShell on Windows) and run these two commands:
 
 ```bash
-claude plugin marketplace add pkkid/claude-mods
-claude plugin install aitools@claude-mods
+claude plugin marketplace add pkkid/claude-aitools
+claude plugin install aitools@claude-aitools
 ```
 
 The first tells Claude Code where to find the mod; the second installs it. If the `claude` command is not found,
@@ -126,8 +126,8 @@ install Claude Code first by following [its setup guide](https://claude.com/clau
 **Or from inside a Claude Code terminal session**, type the same two steps at the prompt:
 
 ```
-/plugin marketplace add pkkid/claude-mods
-/plugin install aitools@claude-mods
+/plugin marketplace add pkkid/claude-aitools
+/plugin install aitools@claude-aitools
 ```
 
 **Then start a new session.** The bar appears above the prompt. In the desktop app the mod is listed under
@@ -140,14 +140,14 @@ install Claude Code first by following [its setup guide](https://claude.com/clau
 - **Get the latest version**:
 
   ```bash
-  claude plugin marketplace update claude-mods
-  claude plugin update aitools@claude-mods
+  claude plugin marketplace update claude-aitools
+  claude plugin update aitools@claude-aitools
   ```
 
 - **Remove it**:
 
   ```bash
-  claude plugin uninstall aitools@claude-mods
+  claude plugin uninstall aitools@claude-aitools
   ```
 
   In a terminal session you can also do all of this from the menu that `/plugin` opens, under **Installed**.
