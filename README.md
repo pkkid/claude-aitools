@@ -58,11 +58,12 @@ All of the bar's own settings live in `~/.claude/aitools.json`, which you can ed
 ### Task View and Clean View
 
 Turn on **Task View** from the 🛠 row and, for any request that takes real work, Claude lays out its plan as a
-checklist under the bar and ticks steps off as it goes, with a progress bar on each. When it finishes, the list folds
-to a single `✓ Done` line.
+checklist in the bar, between its top row and the project row, and ticks steps off as it goes, with a progress bar on
+each. **▾** folds the list to its title and **▸** opens it again; **×** closes it until your next prompt. When it
+finishes, the list folds to a single `✓ Done` line.
 
-**Clean View** does the same and also hides the stream of tool calls and work-in-progress text, leaving just the
-checklist and Claude's final answer. Pick whichever view you like; picking it again turns it off.
+**Clean View** hides the stream of tool calls and work-in-progress text, leaving just Claude's final answer. The two
+are separate toggles: turn on either, both or neither.
 
 ![Task View: a checklist of Claude's plan under the bar](docs/images/taskview.svg)
 

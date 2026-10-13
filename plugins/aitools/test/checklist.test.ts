@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addFinal, finalReplies, isFinalReply, nextView, parseChecklist, progressBar, stepPercent, viewNote } from '../src/checklist'
+import { addFinal, finalReplies, isFinalReply, nextToggle, parseChecklist, progressBar, stepPercent, viewNote } from '../src/checklist'
 
 describe('parseChecklist', () => {
   test('reads a title and steps, trimming text', () => {
@@ -42,25 +42,27 @@ describe('progress bars', () => {
   })
 })
 
-describe('nextView', () => {
-  test('no argument toggles the view, replacing the other; on sets it; off clears only that view', () => {
-    expect(nextView('off', 'clean', '')).toBe('clean')
-    expect(nextView('clean', 'clean', '')).toBe('off')
-    expect(nextView('task', 'clean', '')).toBe('clean')
-    expect(nextView('task', 'clean', ' ON ')).toBe('clean')
-    expect(nextView('clean', 'clean', 'off')).toBe('off')
-    expect(nextView('task', 'clean', 'off')).toBe('task')
-    expect(nextView('off', 'task', 'maybe')).toBeNull()
+describe('nextToggle', () => {
+  test('no argument toggles the view; on and off set it; anything else is not understood', () => {
+    expect(nextToggle(false, '')).toBe(true)
+    expect(nextToggle(true, '')).toBe(false)
+    expect(nextToggle(true, ' ON ')).toBe(true)
+    expect(nextToggle(true, 'off')).toBe(false)
+    expect(nextToggle(false, 'maybe')).toBeNull()
   })
 })
 
 describe('viewNote', () => {
-  test('none when off; Clean View adds the hidden-replies note to Task View', () => {
-    expect(viewNote('off')).toBeNull()
-    expect(viewNote('task')).toContain('mcp__aitools__checklist')
-    expect(viewNote('task')).toContain('Give the step in progress a percent')
-    expect(viewNote('task')).not.toContain('Clean View')
-    expect(viewNote('clean')).toContain('Clean View is on')
+  test('none with both off; each view adds its own note, Clean View naming the checklist only with Task View', () => {
+    expect(viewNote({ isTaskView: false, isCleanView: false })).toBeNull()
+    const task = viewNote({ isTaskView: true, isCleanView: false })
+    expect(task).toContain('mcp__aitools__checklist')
+    expect(task).toContain('Give the step in progress a percent')
+    expect(task).not.toContain('Clean View')
+    const clean = viewNote({ isTaskView: false, isCleanView: true })
+    expect(clean).toContain('Clean View is on: the person sees only your final reply')
+    expect(clean).not.toContain('mcp__aitools__checklist')
+    expect(viewNote({ isTaskView: true, isCleanView: true })).toContain('only the checklist and your final reply')
   })
 })
 

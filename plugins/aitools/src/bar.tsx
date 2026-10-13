@@ -7,7 +7,7 @@ import { VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
 import { MASCOT_HEIGHT, MASCOT_WIDTH } from './mascot'
 import { DOING_TEXT, RED, YELLOW } from './palette'
-import type { LimitWindow, MonthTotal, Settings, Snapshot, ViewMode } from '../types'
+import type { LimitWindow, MonthTotal, Settings, Snapshot } from '../types'
 
 export type View = {
   snapshot: Snapshot | null
@@ -208,10 +208,10 @@ export function segments(view: View): Segment[] {
 /** `Svg` only where the surface draws it (the desktop): the mascot and its option show there alone. */
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] }
 
-/** The 🛠 menu's view options; picking the one that is on turns it off. */
+/** The 🛠 menu's view options, each turned on or off on its own. */
 const VIEWS = [
-  { mode: 'task', label: VIEW_NAMES.task },
-  { mode: 'clean', label: VIEW_NAMES.clean },
+  { view: 'task', label: VIEW_NAMES.task },
+  { view: 'clean', label: VIEW_NAMES.clean },
 ] as const
 
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
@@ -240,7 +240,8 @@ export function renderBar(
     isAskable: boolean
     /** Whether /keepwarm is keeping the cache warm: the bar shows its marker. */
     isKeepingWarm: boolean
-    viewMode: ViewMode
+    isTaskView: boolean
+    isCleanView: boolean
     /** Whether the session works in a GitHub repository: the 🛠 menu offers its Project pane. */
     hasRepo: boolean
     /** The mascot's drawing as it stands now. */
@@ -251,13 +252,14 @@ export function renderBar(
     askme(): void
     handoff(): void
     openNotes(): void
-    setView(mode: ViewMode): void
+    toggleView(view: 'task' | 'clean'): void
     openDock(): void
     openBranches(): void
     openProject(): void
     /** ⁝: opens or closes the AI Tool Settings pane. */
     toggleSettings(): void
   },
+  /** The checklist, drawn between the bar and the project row; null while Task View is off or there is none. */
   checklist: ReturnType<typeof renderChecklist> = null,
   /** The project row, drawn right under the bar; null outside a GitHub repository. */
   projectRow: RenderChildren | null = null,
@@ -325,34 +327,33 @@ export function renderBar(
         <Button key="tasks" label="Tasks" {...QUIET} onPress={() => on.openDock()} />
         <Button key="branches" label="Branches" {...QUIET} onPress={() => on.openBranches()} />
         {flags.hasRepo && <Button key="project" label="Project" {...QUIET} onPress={() => on.openProject()} />}
-        {VIEWS.map(v => (
-          <Button
-            key={v.mode}
-            label={`${flags.viewMode === v.mode ? '●' : '○'} ${v.label}`}
-            {...QUIET}
-            onPress={() => on.setView(flags.viewMode === v.mode ? 'off' : v.mode)}
-          />
-        ))}
+        {VIEWS.map(v => {
+          const isOn = v.view === 'task' ? flags.isTaskView : flags.isCleanView
+
+          return <Button key={v.view} label={`${isOn ? '●' : '○'} ${v.label}`} {...QUIET} onPress={() => on.toggleView(v.view)} />
+        })}
       </Box>
     )
   }
-  // On the desktop the rows get a gap between them; the terminal keeps them on consecutive lines.
-  const bars = projectRow === null ? bar : (
-    <Box flexDirection="column" gap={Svg ? 1 : 0}>
-      {bar}
-      {projectRow}
-    </Box>
-  )
-  if (!menu && !checklist) {
+  // The checklist sits between the bar and the project row. On the desktop the rows get a gap between them; the
+  // terminal keeps the bar and the project row on consecutive lines, with a blank line around the checklist.
+  const bars =
+    checklist === null && projectRow === null ? bar : (
+      <Box flexDirection="column" gap={Svg || checklist !== null ? 1 : 0}>
+        {bar}
+        {checklist}
+        {projectRow}
+      </Box>
+    )
+  if (!menu) {
     return bars
   }
 
-  // The open 🛠 menu sits above the bar and the checklist below it, so the bar itself never shifts.
+  // The open 🛠 menu sits above the bar, so the bar itself never shifts.
   return (
     <Box flexDirection="column" gap={1}>
       {menu}
       {bars}
-      {checklist}
     </Box>
   )
 }

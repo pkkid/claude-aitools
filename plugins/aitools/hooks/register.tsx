@@ -35,7 +35,7 @@ import {
   addFinal,
   finalReplies,
   isFinalReply,
-  nextView,
+  nextToggle,
   parseChecklist,
   renderChecklist,
   viewNote,
@@ -110,7 +110,7 @@ import type { ProjectChange } from '../src/settingspane'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
 import type { BoardData, Branch, BranchTarget, BranchesShow, BranchesWhere, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun } from '../types'
-import type { AgentCard, AgentKind, AgentRun, AgentShowing, Brief, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, ToggleKey, ViewMode } from '../types'
+import type { AgentCard, AgentKind, AgentRun, AgentShowing, Brief, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, ToggleKey } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
 // function that touches `$` lives here; src/ holds the pure units.
@@ -127,8 +127,11 @@ const tick = atom({ plugin: 'aitools', key: 'tick' } as const, 0)
 const isHandingOff = atom({ plugin: 'aitools', key: 'isHandingOff' } as const, false)
 const isToolsOpen = atom({ plugin: 'aitools', key: 'isToolsOpen' } as const, false)
 const brief = atom({ plugin: 'aitools', key: 'brief' } as const, null)
-const viewMode = atom({ plugin: 'aitools', key: 'viewMode' } as const, 'off')
+const isTaskView = atom({ plugin: 'aitools', key: 'isTaskView' } as const, false)
+const isCleanView = atom({ plugin: 'aitools', key: 'isCleanView' } as const, false)
 const checklist = atom({ plugin: 'aitools', key: 'checklist' } as const, null)
+const isChecklistCollapsed = atom({ plugin: 'aitools', key: 'isChecklistCollapsed' } as const, false)
+const isChecklistClosed = atom({ plugin: 'aitools', key: 'isChecklistClosed' } as const, false)
 const finals = atom({ plugin: 'aitools', key: 'finals' } as const, [])
 const isDockOpen = atom({ plugin: 'aitools', key: 'isDockOpen' } as const, false)
 const agentShowing = atom({ plugin: 'aitools', key: 'agentShowing' } as const, 'all')
@@ -518,46 +521,64 @@ async function catchUp($: EngineInterface, key?: ToggleKey): Promise<void> {
     await syncMascot($)
   }
 }
-/** The 🛠 menu's Task View and Clean View: sets the view, saves it for later sessions and closes the menu. */
-async function setView($: EngineInterface, mode: ViewMode): Promise<void> {
+/** Whether a tool's row is hidden: every one under Clean View, the checklist's own under Task View (the band shows it). */
+async function isToolRowHidden($: EngineInterface, tool: string): Promise<boolean> {
+  return (await read($, isCleanView)) || ((await read($, isTaskView)) && tool === CHECKLIST_TOOL_ID)
+}
+
+/** Whether a view is on. */
+async function isViewOn($: EngineInterface, view: 'task' | 'clean'): Promise<boolean> {
+  return view === 'task' ? read($, isTaskView) : read($, isCleanView)
+}
+
+/** Turns one view on or off, on its own: saves it for later sessions and closes the 🛠 menu. */
+async function setView($: EngineInterface, view: 'task' | 'clean', isOn: boolean): Promise<void> {
   await update($, isToolsOpen, () => false)
-  await update($, viewMode, () => mode)
-  await savePersonal($, { view: mode })
+  if (view === 'task') {
+    await update($, isTaskView, () => isOn)
+  } else {
+    await update($, isCleanView, () => isOn)
+  }
+  await savePersonal($, view === 'task' ? { taskView: isOn } : { cleanView: isOn })
   await showStatus($)
-  await startView($, mode)
+  await startViews($)
+}
+
+/** The 🛠 menu's Task View and Clean View: each turns its view on or off. */
+async function toggleView($: EngineInterface, view: 'task' | 'clean'): Promise<void> {
+  await setView($, view, !(await isViewOn($, view)))
 }
 
 /**
- * What a view needs once it is on: the checklist tool offered to the model, and for Clean View the final replies so
- * far (only kept while it is on).
+ * What the views need once on: for Task View the checklist tool offered to the model, for Clean View the final
+ * replies so far (only kept while it is on).
  */
-async function startView($: EngineInterface, mode: ViewMode): Promise<void> {
-  if (mode === 'off') {
-    return
+async function startViews($: EngineInterface): Promise<void> {
+  if (await read($, isTaskView)) {
+    await registerTool($, CHECKLIST_SPEC)
   }
-  await registerTool($, CHECKLIST_SPEC)
-  if (mode === 'clean') {
+  if (await read($, isCleanView)) {
     const earlier = finalReplies(await $.session.messages().catch(() => []))
     await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
   }
 }
 
-/** The status line under the prompt: the view that is on, if any; cleared when none. */
+/** The status line under the prompt: the views that are on, comma separated; cleared when none. */
 async function showStatus($: EngineInterface): Promise<void> {
-  const mode = await read($, viewMode)
-  $.ui.status(mode === 'off' ? undefined : VIEW_NAMES[mode])
+  const on = [(await read($, isTaskView)) ? VIEW_NAMES.task : '', (await read($, isCleanView)) ? VIEW_NAMES.clean : ''].filter(Boolean)
+  $.ui.status(on.length > 0 ? on.join(', ') : undefined)
 }
 
-/** /taskview and /cleanview: toggles the view, or sets it with on/off, and says what is on now. */
+/** /taskview and /cleanview: toggles the view, or sets it with on/off, and says how it stands now. */
 async function viewCommand($: EngineInterface, view: 'task' | 'clean', args: string): Promise<{ text: string }> {
   const name = VIEW_NAMES[view]
-  const mode = nextView(await read($, viewMode), view, args)
-  if (mode === null) {
+  const isOn = nextToggle(await isViewOn($, view), args)
+  if (isOn === null) {
     return { text: `Usage: /${view}view [on|off] (no argument toggles ${name})` }
   }
-  await setView($, mode)
+  await setView($, view, isOn)
 
-  return { text: mode === 'off' ? `${name} off.` : `${VIEW_NAMES[mode]} on.` }
+  return { text: `${name} ${isOn ? 'on' : 'off'}.` }
 }
 
 /** Redraws the dock's running times each second; with nothing running any more, the timer stops. */
@@ -1073,15 +1094,20 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isToolsOpen: await read($, isToolsOpen),
     isAskable: await read($, isAskable),
     isKeepingWarm: (await read($, keepWarm)) !== null,
-    viewMode: await read($, viewMode),
+    isTaskView: await read($, isTaskView),
+    isCleanView: await read($, isCleanView),
     hasRepo: (await read($, githubRepo)) !== null,
     // Read only where it is drawn and turned on, so no other bar redraws for the mascot.
     mascot: el.Svg && current.mascot ? drawMascot(await read($, mascot)) : null,
   }
+  // Closed (× on its title row), the checklist stays away until the person's next prompt.
   const list =
-    flags.viewMode === 'off'
+    !flags.isTaskView || (await read($, isChecklistClosed))
       ? null
-      : renderChecklist(el, await read($, checklist), isWorking, () => void update($, checklist, () => null))
+      : renderChecklist(el, await read($, checklist), isWorking, await read($, isChecklistCollapsed), {
+          toggle: () => void update($, isChecklistCollapsed, isCollapsed => !isCollapsed),
+          close: () => void update($, isChecklistClosed, () => true),
+        })
 
   const projectRow = await drawProjectRow($, el, el.Svg ? 0 : 2)
 
@@ -1091,7 +1117,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     handoff: () => void showHandoff($),
     openNotes: () => void openNotes($),
     toggleSettings: () => void toggleSettingsPane($),
-    setView: mode => void setView($, mode),
+    toggleView: view => void toggleView($, view),
     openDock: () => void openDock($),
     openBranches: () => void openBranches($),
     openProject: () => void openProject($),
@@ -1557,8 +1583,9 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   await update($, hideAfter, () => p.hideAfter)
   await update($, branchesWhere, () => p.branchesWhere)
   await update($, branchesShow, () => p.branchesShow)
-  const wasView = await read($, viewMode)
-  await update($, viewMode, () => p.view)
+  const wasViews = [await read($, isTaskView), await read($, isCleanView)]
+  await update($, isTaskView, () => p.taskView)
+  await update($, isCleanView, () => p.cleanView)
   if (isLoad) {
     return
   }
@@ -1568,9 +1595,9 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   for (const key of Object.keys(p.settings) as ToggleKey[]) {
     if (p.settings[key] && !was[key]) await catchUp($, key)
   }
-  if (wasView !== p.view) {
+  if (wasViews[0] !== p.taskView || wasViews[1] !== p.cleanView) {
     await showStatus($)
-    await startView($, p.view)
+    await startViews($)
   }
   syncListenerPoll($)
   syncBoardReads($)
@@ -2268,11 +2295,10 @@ export const register: Register = on => {
     // fall asleep.
     $.clock.every(TICK_MS, () => void onTick($))
     await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar, or its project row', argumentHint: '[on|off|project [on|off]]' })
-    const view = await read($, viewMode)
     await showStatus($)
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back, for
     // what is on.
-    await startView($, view)
+    await startViews($)
     const rows = await $.session.messages().catch(() => [])
     await update($, isAskable, () => isAskableIn(rows))
     // The project row: the repository, its file, and the issue the first prompt named (read from the transcript on
@@ -2408,7 +2434,7 @@ export const register: Register = on => {
     await armKeepWarm($)
     const isAsking = e.reason === 'answer' && !isAskedThisRequest && asksQuestions(e.answer)
     await update($, isAskable, () => isAsking)
-    if ((await read($, viewMode)) === 'clean') {
+    if (await read($, isCleanView)) {
       await update($, finals, list => addFinal(list, e.answer))
     }
     if (await isMascotOn($)) {
@@ -2526,11 +2552,12 @@ export const register: Register = on => {
       // The session's first prompt names the issue the project row links to, if any.
       await noteFirstPrompt($, e.text)
       await update($, checklist, () => null)
+      await update($, isChecklistClosed, () => false)
       await update($, isQuestionOpen, () => false)
       await update($, isAskable, () => false)
       isAskedThisRequest = false
     }
-    const view = viewNote(await read($, viewMode))
+    const view = viewNote({ isTaskView: await read($, isTaskView), isCleanView: await read($, isCleanView) })
 
     return view === null ? next(e) : next({ ...e, context: [...(e.context ?? []), view] })
   })
@@ -2885,24 +2912,14 @@ export const register: Register = on => {
   })
 
   // Clean View hides every tool row; Task View hides only the checklist tool's own, which the band already shows.
-  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    const mode = await read($, viewMode)
-    const isRowHidden = mode === 'clean' || (mode === 'task' && e.props.tool === CHECKLIST_TOOL_ID)
-
-    return isRowHidden ? drawNothing($, e) : next(e)
-  })
-  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
-    const mode = await read($, viewMode)
-    const isRowHidden = mode === 'clean' || (mode === 'task' && e.props.tool === CHECKLIST_TOOL_ID)
-
-    return isRowHidden ? drawNothing($, e) : next(e)
-  })
-  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => ((await read($, viewMode)) === 'clean' ? drawNothing($, e) : next(e)))
-  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => ((await read($, viewMode)) === 'clean' ? drawNothing($, e) : next(e)))
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => ((await isToolRowHidden($, e.props.tool)) ? drawNothing($, e) : next(e)))
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => ((await isToolRowHidden($, e.props.tool)) ? drawNothing($, e) : next(e)))
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => ((await read($, isCleanView)) ? drawNothing($, e) : next(e)))
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => ((await read($, isCleanView)) ? drawNothing($, e) : next(e)))
 
   // Clean View shows only text that belongs to a finished turn's final reply; the rest is work in progress.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if ((await read($, viewMode)) !== 'clean' || isFinalReply(e.props.text, await read($, finals))) {
+    if (!(await read($, isCleanView)) || isFinalReply(e.props.text, await read($, finals))) {
       return next(e)
     }
 

@@ -1,6 +1,6 @@
 import type { Elements } from 'claude-code'
 
-import type { Checklist, ChecklistItem, ViewMode } from '../types'
+import type { Checklist, ChecklistItem } from '../types'
 import { BLUE, DOING_TEXT, GREEN } from './palette'
 
 /** The checklist tool's short name; the model calls it as `mcp__aitools__checklist`. */
@@ -50,35 +50,34 @@ const TASK_NOTE =
   'again as it moves (roughly every quarter of the step) so its progress bar keeps up. Mark every step done before ' +
   'your final reply. Skip the checklist for a quick question that needs no work.'
 
-const CLEAN_NOTE =
-  ' Clean View is on: the person sees only the checklist and your final reply, not your tool calls or anything you ' +
-  'write before it. Do not narrate between steps; put what they need in a brief final reply.'
+/** Clean View's note: what the person sees besides the final reply depends on whether Task View is on too. */
+function cleanNote(isTaskView: boolean): string {
+  const sees = isTaskView ? 'only the checklist and your final reply' : 'only your final reply'
+
+  return (
+    `Clean View is on: the person sees ${sees}, not your tool calls or anything you write before it. Do not ` +
+    'narrate between steps; put what they need in a brief final reply.'
+  )
+}
 
 /** The views' names as the menu, the commands and their replies spell them. */
 export const VIEW_NAMES = { task: 'Task View', clean: 'Clean View' } as const
 
 /**
- * The view after `/taskview` or `/cleanview` with `args`: no argument toggles that view (turning it on replaces the
- * other), `on` sets it, `off` turns it off if it is the one on; null for anything else.
+ * Whether a view is on after `/taskview` or `/cleanview` with `args`: no argument toggles it, `on` and `off` set it;
+ * null for anything else. Each view is on or off on its own.
  */
-export function nextView(current: ViewMode, view: 'task' | 'clean', args: string): ViewMode | null {
+export function nextToggle(isOn: boolean, args: string): boolean | null {
   const word = args.trim().toLowerCase()
-  if (word === '') {
-    return current === view ? 'off' : view
-  }
-  if (word === 'on') {
-    return view
-  }
-  if (word === 'off') {
-    return current === view ? 'off' : current
-  }
 
-  return null
+  return word === '' ? !isOn : word === 'on' ? true : word === 'off' ? false : null
 }
 
-/** The hidden note a prompt carries while a view is on; null when off. */
-export function viewNote(mode: ViewMode): string | null {
-  return mode === 'off' ? null : mode === 'clean' ? TASK_NOTE + CLEAN_NOTE : TASK_NOTE
+/** The hidden note a prompt carries while a view is on; null with neither. */
+export function viewNote(views: { isTaskView: boolean; isCleanView: boolean }): string | null {
+  const notes = [views.isTaskView ? TASK_NOTE : '', views.isCleanView ? cleanNote(views.isTaskView) : ''].filter(Boolean)
+
+  return notes.length === 0 ? null : notes.join(' ')
 }
 
 /** The checklist tool's input as a Checklist, or the reason it is not one. */
@@ -172,9 +171,20 @@ const MARKS = { done: '✓', doing: '●', todo: '○' } as const
 /** Done marks green, the step in progress blue; steps not started stay dim. */
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 
-/** The checklist under the bar: the steps while work goes on, one line once every step is done. */
-/** `onClose` clears the checklist: the × at the end of the folded Done line. */
-export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean, onClose: () => void) {
+/** The collapse toggle's marks: ▸ folded to the title row, ▾ open. */
+export const FOLD_MARKS = { collapsed: '▸', expanded: '▾' } as const
+
+/**
+ * The checklist in the band: a title row (▸ or ▾ to fold it, the title, how many steps are done, × to close it), then
+ * the steps while work goes on; one line once every step is done. Folded, only the title row shows.
+ */
+export function renderChecklist(
+  el: El,
+  list: Checklist | null,
+  isWorking: boolean,
+  isCollapsed: boolean,
+  on: { toggle(): void; close(): void },
+) {
   const { Box, Text, Button } = el
   if (list === null) {
     return null
@@ -188,17 +198,37 @@ export function renderChecklist(el: El, list: Checklist | null, isWorking: boole
           <Text color={MARK_COLORS.done}>{`${MARKS.done} `}</Text>
           <Text dimColor wrap="truncate-end">{`Done: ${list.title} (${steps})`}</Text>
         </Box>
-        <Button key="checklist-close" label="×" plain dimColor onPress={() => onClose()} />
+        <Button key="checklist-close" label="×" plain dimColor onPress={() => on.close()} />
       </Box>
     )
+  }
+  const titleRow = (
+    <Box key="checklist-title" flexDirection="row" justifyContent="space-between">
+      <Box flexDirection="row" flexShrink={1} minWidth={0} columnGap={1}>
+        <Button
+          key="checklist-fold"
+          label={isCollapsed ? FOLD_MARKS.collapsed : FOLD_MARKS.expanded}
+          plain
+          dimColor
+          onPress={() => on.toggle()}
+        />
+        <Box flexShrink={1} minWidth={0}>
+          <Text color={DOING_TEXT} wrap="truncate-end">{list.title}</Text>
+        </Box>
+      </Box>
+      <Box flexDirection="row" flexShrink={0} columnGap={1}>
+        <Text dimColor>{`${done} of ${list.items.length}`}</Text>
+        <Button key="checklist-close" label="×" plain dimColor onPress={() => on.close()} />
+      </Box>
+    </Box>
+  )
+  if (isCollapsed) {
+    return titleRow
   }
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text bold>{list.title}</Text>
-        <Text dimColor>{`${done} of ${list.items.length}`}</Text>
-      </Box>
+      {titleRow}
       {list.items.map((item, i) => {
         const percent = stepPercent(item)
         const bar = progressBar(percent)

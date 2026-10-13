@@ -3,7 +3,7 @@
  *
  * `~/.claude/aitools.json` (under CLAUDE_CONFIG_DIR when set) holds the person's own settings: what the bar shows
  * (the project row among it),
- * the view, the Background tasks and Branches panes' picks. Everything the mod's own controls change is written here, never to a
+ * the views, the Background tasks and Branches panes' picks. Everything the mod's own controls change is written here, never to a
  * project's file. `<repo>/.claude/aitools.json` holds only the `project` section (src/project.tsx reads it).
  *
  * Both files are JSON. A write reads the file again first and changes only the keys it sets, so hand edits and keys
@@ -13,7 +13,7 @@
 import { DEFAULT_HIDE_AFTER, isHideAfter, isShowing } from './agentdock'
 import { DEFAULT_SHOW, DEFAULT_WHERE, isBranchesShow, isBranchesWhere } from './branches'
 import { DEFAULT_SETTINGS, LEGACY_KEYS, normalizeSettings } from './settings'
-import type { AgentShowing, BranchesShow, BranchesWhere, HideAfter, Settings, ViewMode } from '../types'
+import type { AgentShowing, BranchesShow, BranchesWhere, HideAfter, Settings } from '../types'
 
 /** The file's name, in the Claude config folder and in a project's `.claude` folder. */
 export const CONFIG_FILE = 'aitools.json'
@@ -26,7 +26,9 @@ export type Personal = {
   settings: Settings
   /** `/aitools off`: the whole bar hidden. */
   isHidden: boolean
-  view: ViewMode
+  /** Task View and Clean View, each on or off on its own. */
+  taskView: boolean
+  cleanView: boolean
   showing: AgentShowing
   hideAfter: HideAfter
   branchesWhere: BranchesWhere
@@ -36,7 +38,8 @@ export type Personal = {
 export const PERSONAL_DEFAULTS: Personal = {
   settings: DEFAULT_SETTINGS,
   isHidden: false,
-  view: 'off',
+  taskView: false,
+  cleanView: false,
   showing: 'all',
   hideAfter: DEFAULT_HIDE_AFTER,
   branchesWhere: DEFAULT_WHERE,
@@ -74,12 +77,15 @@ export function personalFrom(raw: Json): Personal {
   const bar = objectAt(raw, 'bar')
   const subagents = objectAt(raw, 'subagents')
   const branches = objectAt(raw, 'branches')
-  const view = raw.view
+  // `view` was one word before the views were apart: `task`, or `clean`, which brought the checklist with it.
+  const legacy = raw.view
+  const view = objectAt(raw, 'view')
 
   return {
     settings: normalizeSettings(objectAt(bar, 'show')),
     isHidden: bar.hidden === true,
-    view: view === 'task' || view === 'clean' ? view : 'off',
+    taskView: legacy === 'task' || legacy === 'clean' || view.tasks === true,
+    cleanView: legacy === 'clean' || view.clean === true,
     showing: isShowing(subagents.showing) ? subagents.showing : PERSONAL_DEFAULTS.showing,
     hideAfter: isHideAfter(subagents.hideAfter) ? subagents.hideAfter : PERSONAL_DEFAULTS.hideAfter,
     branchesWhere: isBranchesWhere(branches.where) ? branches.where : PERSONAL_DEFAULTS.branchesWhere,
@@ -91,7 +97,8 @@ export function personalFrom(raw: Json): Personal {
 const PATHS: { [K in keyof Personal]: readonly [string, ...string[]] } = {
   settings: ['bar', 'show'],
   isHidden: ['bar', 'hidden'],
-  view: ['view'],
+  taskView: ['view', 'tasks'],
+  cleanView: ['view', 'clean'],
   showing: ['subagents', 'showing'],
   hideAfter: ['subagents', 'hideAfter'],
   branchesWhere: ['branches', 'where'],
@@ -165,6 +172,11 @@ export function migrated(raw: Json, stored: StoredSettings): Json {
     subagents: { showing: stored.agentShowing, hideAfter: stored.agentHideAfter },
   })
   let next = RETIRED_PATHS.reduce(withoutAt, raw)
+  if (typeof next.view === 'string') {
+    // The one-word view of before, as the two it stands for.
+    const was = personalFrom(next)
+    next = { ...next, view: { tasks: was.taskView, clean: was.cleanView } }
+  }
   for (const key of Object.keys(PATHS) as (keyof Personal)[]) {
     if (key === 'settings') {
       // Each display option on its own, so one added in a later version joins a file that has the rest.

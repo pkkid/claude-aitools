@@ -427,7 +427,7 @@ describe('wiring', () => {
       await ui.unmount()
     }
 
-    test('the 🛠 menu marks the view that is on with ●, and the other view replaces it', async ($, on) => {
+    test('the 🛠 menu marks each view that is on with ●, and each turns on and off on its own', async ($, on) => {
       await start($, on, { usd: 0 })
       await pickView($, 'task')
       const ui = await $.ui.mount(band())
@@ -437,9 +437,11 @@ describe('wiring', () => {
       await ui.press({ key: 'clean' })
       await ui.press({ key: 'tools' })
       expect((await ui.find({ key: 'clean' }))?.text).toBe('● Clean View')
-      await ui.press({ key: 'clean' })
+      expect((await ui.find({ key: 'task' }))?.text).toBe('● Task View')
+      await ui.press({ key: 'task' })
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'clean' }))?.text).toBe('○ Clean View')
+      expect((await ui.find({ key: 'task' }))?.text).toBe('○ Task View')
+      expect((await ui.find({ key: 'clean' }))?.text).toBe('● Clean View')
       await ui.unmount()
     })
 
@@ -452,7 +454,7 @@ describe('wiring', () => {
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'tools' })
       expect((await ui.find({ key: 'clean' }))?.text).toBe('● Clean View')
-      expect((await ui.find({ key: 'task' }))?.text).toBe('○ Task View')
+      expect((await ui.find({ key: 'task' }))?.text).toBe('● Task View')
       await ui.unmount()
       expect((await run('cleanview')).text).toBe('Clean View off.')
       expect((await run('taskview', 'on')).text).toBe('Task View on.')
@@ -460,7 +462,7 @@ describe('wiring', () => {
       expect((await run('taskview', 'bogus')).text).toBe('Usage: /taskview [on|off] (no argument toggles Task View)')
     })
 
-    test('the status line names the view that is on and clears when both are off', async ($, on) => {
+    test('the status line names the views that are on and clears when both are off', async ($, on) => {
       const statuses: (string | undefined)[] = []
       on('ui.status', (_, e) => {
         statuses.push(e.text)
@@ -468,8 +470,25 @@ describe('wiring', () => {
       })
       await start($, on, { usd: 0 }, { viewMode: 'task' })
       await pickView($, 'clean')
+      await pickView($, 'task')
       await pickView($, 'clean')
-      expect(statuses).toEqual(['Task View', 'Clean View', undefined])
+      expect(statuses).toEqual(['Task View', 'Task View, Clean View', 'Clean View', undefined])
+    })
+
+    test('Clean View alone shows no checklist and asks for none; Task View alone hides nothing but its own row', async ($, on) => {
+      const contexts: (readonly string[] | undefined)[] = []
+      on('prompt.submit', (_, e) => {
+        contexts.push(e.context)
+        return { text: e.text }
+      })
+      await start($, on, { usd: 0 })
+      await pickView($, 'clean')
+      await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
+      expect(contexts[0]?.join('')).toContain('Clean View is on: the person sees only your final reply')
+      expect(contexts[0]?.join('')).not.toContain(CHECKLIST)
+      expect(registered).not.toContain('checklist')
+      await $.tool.call({ tool: CHECKLIST, ...PLAN })
+      expect(await barText($)).not.toContain('Dark mode')
     })
 
     test('a saved view comes back in a new session', async ($, on) => {
@@ -509,7 +528,7 @@ describe('wiring', () => {
       expect(text).toContain('✓ Read the theme100% ▰▰▰▰▰▰')
     })
 
-    test('the checklist sits below the bar with green, blue and dim marks', async ($, on) => {
+    test('the checklist sits below the bar with green, blue and dim marks, its title plain and not bold', async ($, on) => {
       await start($, on, { usd: 0 })
       await pickView($, 'task')
       await $.tool.call({ tool: CHECKLIST, ...PLAN })
@@ -518,6 +537,8 @@ describe('wiring', () => {
       const ui = await $.ui.mount(band())
       const texts = await ui.findAll({ type: 'Text' })
       await ui.unmount()
+      const title = texts.find(t => t.text === 'Dark mode')
+      expect([title?.props.color, title?.props.bold ?? false]).toEqual([DOING_TEXT, false])
       const marks = texts.filter(t => ['✓ ', '● ', '○ '].includes(t.text))
       expect(marks.map(m => [m.text, m.props.color ?? null, m.props.dimColor ?? false])).toEqual([
         ['✓ ', GREEN, false],
@@ -540,6 +561,30 @@ describe('wiring', () => {
       const text = await barText($)
       expect(text).toContain('✓ Done: Dark mode (3 steps)')
       expect(text).not.toContain('Read the theme')
+    })
+
+    test('▾ folds the checklist to its title row and ▸ opens it again; × closes it until the next prompt', async ($, on) => {
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 })
+      await pickView($, 'task')
+      await $.tool.call({ tool: CHECKLIST, ...PLAN })
+      const ui = await $.ui.mount(band())
+      expect((await ui.find({ key: 'checklist-fold' }))?.text).toBe('▾')
+      await ui.press({ key: 'checklist-fold' })
+      expect((await ui.find({ key: 'checklist-fold' }))?.text).toBe('▸')
+      expect(await barText($)).toContain('Dark mode')
+      expect(await barText($)).not.toContain('Add the tokens')
+      await ui.press({ key: 'checklist-fold' })
+      expect(await barText($)).toContain('Add the tokens')
+      await ui.press({ key: 'checklist-close' })
+      await ui.unmount()
+      expect(await barText($)).not.toContain('Dark mode')
+      // Claude updating the list in the same request leaves it closed; the person's next prompt brings it back.
+      await $.tool.call({ tool: CHECKLIST, ...PLAN })
+      expect(await barText($)).not.toContain('Dark mode')
+      await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+      await $.tool.call({ tool: CHECKLIST, ...PLAN, title: 'Light mode' })
+      expect(await barText($)).toContain('Light mode')
     })
 
     test('the × at the end of the Done line closes it', async ($, on) => {
@@ -1969,6 +2014,18 @@ describe('wiring', () => {
       expect(await rowText($)).toEqual({})
     })
 
+    test('the checklist sits between the bar and the project row', async ($, on) => {
+      world(on)
+      await start($, on, { usd: 0 }, { viewMode: 'task' })
+      await $.tool.call({ tool: 'mcp__aitools__checklist', title: 'Dark mode', items: [{ text: 'Add the tokens', status: 'doing' }] })
+      // The whole band's text in order, buttons (the project row's name) included.
+      const ui = await $.ui.mount(band())
+      const text = (await ui.findAll({}))[0]?.text ?? ''
+      await ui.unmount()
+      expect(text.indexOf('AI Tools')).toBeLessThan(text.indexOf('Dark mode'))
+      expect(text.indexOf('Dark mode')).toBeLessThan(text.indexOf('vowelit'))
+    })
+
     test("the repository's name and the first prompt's issue open in the browser; the board's open items, its pane", async ($, on) => {
       const w = world(on)
       on('prompt.submit', (_, e) => ({ text: e.text }))
@@ -2197,7 +2254,7 @@ describe('wiring', () => {
       const file = saved(map)
       expect(file.bar.show.label).toBe(false)
       expect(file.bar.show.weekly).toBe(true)
-      expect(file.view).toBe('task')
+      expect(file.view).toEqual({ tasks: true, clean: false })
       expect(file.subagents.hideAfter).toBe(5)
     })
 

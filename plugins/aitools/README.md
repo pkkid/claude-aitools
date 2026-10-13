@@ -99,7 +99,7 @@ dim line in the chat says what's wrong.
     "hidden": false,
     "show": { "mascot": true, "label": true, "projectRow": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
   },
-  "view": "off",
+  "view": { "tasks": false, "clean": false },
   "subagents": { "showing": "all", "hideAfter": "never" },
   "branches": { "where": "both", "show": "all" }
 }
@@ -202,17 +202,23 @@ Where a surface cannot draw the box (VS Code, the mobile app), the pane says whe
 
 ## Task View and Clean View
 
-Two views from the **🛠** menu that turn Claude's work into a checklist under the bar (an open menu still shows
-above it): done steps marked with a green ✓, the step in progress with a blue ●, steps not started with a dim ○.
-In the menu a ● marks the view that is on and a ○ the one that is off; picking the one that is on turns it off, and
-picking the other switches. The choice holds across sessions.
+Two views from the **🛠** menu, each turned on and off on its own: **Task View** draws Claude's work as a checklist in
+the bar, and **Clean View** hides Claude's work in the chat, leaving its final replies. In the menu a ● marks a view
+that is on and a ○ one that is off; picking one turns it on or off. The choices hold across sessions (`view.tasks` and
+`view.clean` in the settings file; a file from when the views were one choice reads `"task"` as Task View and
+`"clean"` as both).
 
-While one is on, its name shows in the status line under the prompt. `/taskview` and `/cleanview` do the same as the
-menu from the prompt: no argument toggles that view (turning it on switches off the other), `on` turns it on and `off`
-turns it off.
+While a view is on, its name shows in the status line under the prompt (both, comma separated). `/taskview` and
+`/cleanview` do the same as the menu from the prompt: no argument toggles that view, `on` turns it on and `off` turns
+it off.
+
+The checklist sits between the bar's top row and the project row (an open menu still shows above the bar): done steps
+marked with a green ✓, the step in progress with a blue ●, steps not started with a dim ○. Its title row starts with
+**▾**, which folds the list to that row for the session (**▸** opens it again), and ends with how many steps are done
+and **×**, which closes the list until your next prompt; Claude updating it meanwhile leaves it closed.
 
 ```
-Adding dark mode                                                    3 of 5
+▾ Adding dark mode                                                3 of 5 ×
 ✓ Read the theme code                                       100% ▰▰▰▰▰▰
 ✓ Add the color tokens                                      100% ▰▰▰▰▰▰
 ● Wire up the toggle                                         40% ▰▰▱▱▱▱
@@ -224,18 +230,21 @@ Each step has a bar: full once done, empty until it starts, and for the step in 
 far along it is, which moves each time Claude updates the checklist (the note asks for about every quarter of a step).
 
 - **Task View** shows the checklist and leaves the chat as it is (only the checklist tool's own rows are hidden).
-- **Clean View** shows the checklist and hides every tool call and everything Claude writes while it works; only the
-  final reply of each finished request stays. It hides tool calls and in-progress replies already in the chat too.
+- **Clean View** hides every tool call and everything Claude writes while it works; only the final reply of each
+  finished request stays. It hides tool calls and in-progress replies already in the chat too. With Task View on as
+  well, the checklist is what shows the work meanwhile.
 
-While a view is on, each prompt you send carries a hidden note asking Claude to plan the work as plain-language steps
-and report them through the mod's `checklist` tool (`mcp__aitools__checklist`), updating it as each step starts and
+While Task View is on, each prompt you send carries a hidden note asking Claude to plan the work as plain-language
+steps and report them through the mod's `checklist` tool (`mcp__aitools__checklist`), updating it as each step starts and
 finishes. The mod answers that tool itself, before Claude Code's permission check, so it
 should not ask for permission. Each new prompt starts a fresh checklist;
 once every step is done and Claude stops, it folds to one line, `✓ Done: <title> (<n> steps)`, with a **×** at its
 right end that closes it. A quick question that
 needs no work gets no checklist.
 
-Clean View recognizes a final reply as the last thing Claude wrote before your next prompt. It reads them from the
+While Clean View is on, each prompt also carries a note asking Claude not to narrate between steps and to put what
+you need in a brief final reply. Clean View recognizes a final reply as the last thing Claude wrote before your next
+prompt. It reads them from the
 conversation when the mod loads (so replies from before a reload or restart still show) and adds each new one as a
 request finishes.
 

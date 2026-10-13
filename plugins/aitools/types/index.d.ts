@@ -43,9 +43,6 @@ export type Brief = { status: 'writing' | 'ready' | 'error'; text: string }
 /** The note as read when the Notes pane opened, or why it could not be read; null while it loads. */
 export type NotesFile = { text: string } | { error: string } | null
 
-/** Which checklist view is on: Task View keeps the chat as is, Clean View hides tool calls and in-progress replies. */
-export type ViewMode = 'off' | 'task' | 'clean'
-
 /** One step; `percent` is the model's estimate of how far along a step in progress is (0 to 100). */
 export type ChecklistItem = { text: string; status: 'todo' | 'doing' | 'done'; percent?: number }
 
@@ -292,10 +289,16 @@ declare module 'claude-code' {
       isToolsOpen: boolean
       /** What the handoff pane shows; null until the 🛠 menu's Handoff first runs. */
       brief: Brief | null
-      /** Which checklist view is on; mirrored in $.store so it holds across sessions. */
-      viewMode: ViewMode
+      /** Task View: Claude's plan as a checklist in the band. Saved in the settings file. */
+      isTaskView: boolean
+      /** Clean View: tool calls and in-progress replies hidden, only final replies shown. Saved in the settings file. */
+      isCleanView: boolean
       /** The checklist for the current request; cleared when the person sends a new one. */
       checklist: Checklist | null
+      /** The checklist folded to its title row, for the session. */
+      isChecklistCollapsed: boolean
+      /** The checklist closed until the person's next prompt. */
+      isChecklistClosed: boolean
       /** Final replies of finished turns: the only assistant text Clean View shows. */
       finals: string[]
       /** Whether the Subagents pane is open; closed, none of its settings apply. Not kept across sessions. */
