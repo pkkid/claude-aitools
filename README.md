@@ -3,7 +3,7 @@
 **AI Tools** is a mod for [Claude Code](https://claude.com/claude-code) that adds one slim ribbon above the prompt.
 At a glance it shows how much of your Claude subscription you have used, how full the conversation is, and what the
 work would have cost at API prices. Behind two small buttons it adds a live checklist of Claude's plan, a panel for
-watching background tasks, a panel for tidying up worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
+watching background tasks, a panel for cleaning up finished branches and worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
 stands at the start of the bar acting out what Claude is doing.
 
 It works in the **Code tab of the Claude desktop app** and in the **`claude` terminal app**.
@@ -75,17 +75,19 @@ stacked on his head for every task at work.
 
 ![The Background tasks pane](docs/images/tasks.svg)
 
-### Worktrees
+### Branches
 
-Worktrees from finished sessions pile up. The **Worktrees** pane lists every worktree of the project, the main checkout
-first, each with what it still holds (changed files, unpushed commits, merged, its pull request), how old it is, lines
-added and removed, whether CI passed, and a × to delete it.
+Branches and worktrees from finished sessions pile up. The **Branches** pane lists every branch of the project, one
+row each: whether it lives on your computer, on GitHub or both, whether it is checked out in a worktree, what it still
+holds (changed files, unpushed or unmerged commits), how old it is, lines added and removed, its pull request, whether
+CI passed, and a × to delete it. Filters show local or remote branches, and active or done ones.
 
-**Prune worktrees** removes every worktree that is merged and has nothing uncommitted, with its local and remote
-branch, after asking first. Anything with work in it stays. Clawd prunes a tree beside the list, sweeps up while
-worktrees are removed, and naps when there are none. The pane only reads git while it is open.
+A branch is **done** once its parent has all its work: its commits are on the base branch, or its pull request was
+merged. **Clean up** removes every done branch's worktree, local branch and remote branch, after asking first.
+Anything with work in it stays. Clawd prunes a tree beside the list, sweeps up while branches are removed, and naps
+when there is nothing to clean up. The pane only reads git while it is open.
 
-![The Worktrees pane](docs/images/worktrees.svg)
+![The Branches pane](docs/images/branches.svg)
 
 ### Handoff
 
@@ -105,7 +107,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 | `/askme` | Ask the questions from Claude's last answer again as pop-up choices, with a recommendation first |
 | `/taskview`, `/cleanview` | Turn Task View or Clean View on or off |
 | `/tasks` | Open or close the Background tasks pane |
-| `/worktrees` | Open or close the Worktrees pane |
+| `/branches` | Open or close the Branches pane |
 
 The full reference for every option is in the [mod's own README](plugins/aitools/README.md).
 

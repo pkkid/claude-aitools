@@ -3,7 +3,7 @@
  *
  * `~/.claude/aitools.json` (under CLAUDE_CONFIG_DIR when set) holds the person's own settings: what the bar shows
  * (the project row among it),
- * the view, the Background tasks pane's picks. Everything the mod's own controls change is written here, never to a
+ * the view, the Background tasks and Branches panes' picks. Everything the mod's own controls change is written here, never to a
  * project's file. `<repo>/.claude/aitools.json` holds only the `project` section (src/project.tsx reads it).
  *
  * Both files are JSON. A write reads the file again first and changes only the keys it sets, so hand edits and keys
@@ -11,8 +11,9 @@
  */
 
 import { DEFAULT_HIDE_AFTER, isHideAfter, isShowing } from './agentdock'
+import { DEFAULT_SHOW, DEFAULT_WHERE, isBranchesShow, isBranchesWhere } from './branches'
 import { DEFAULT_SETTINGS, LEGACY_KEYS, normalizeSettings } from './settings'
-import type { AgentShowing, HideAfter, Settings, ViewMode } from '../types'
+import type { AgentShowing, BranchesShow, BranchesWhere, HideAfter, Settings, ViewMode } from '../types'
 
 /** The file's name, in the Claude config folder and in a project's `.claude` folder. */
 export const CONFIG_FILE = 'aitools.json'
@@ -28,6 +29,8 @@ export type Personal = {
   view: ViewMode
   showing: AgentShowing
   hideAfter: HideAfter
+  branchesWhere: BranchesWhere
+  branchesShow: BranchesShow
 }
 
 export const PERSONAL_DEFAULTS: Personal = {
@@ -36,6 +39,8 @@ export const PERSONAL_DEFAULTS: Personal = {
   view: 'off',
   showing: 'all',
   hideAfter: DEFAULT_HIDE_AFTER,
+  branchesWhere: DEFAULT_WHERE,
+  branchesShow: DEFAULT_SHOW,
 }
 
 /** A file's text as JSON: an object, or why it is not one. */
@@ -68,6 +73,7 @@ export function objectAt(raw: Json, key: string): Json {
 export function personalFrom(raw: Json): Personal {
   const bar = objectAt(raw, 'bar')
   const subagents = objectAt(raw, 'subagents')
+  const branches = objectAt(raw, 'branches')
   const view = raw.view
 
   return {
@@ -76,6 +82,8 @@ export function personalFrom(raw: Json): Personal {
     view: view === 'task' || view === 'clean' ? view : 'off',
     showing: isShowing(subagents.showing) ? subagents.showing : PERSONAL_DEFAULTS.showing,
     hideAfter: isHideAfter(subagents.hideAfter) ? subagents.hideAfter : PERSONAL_DEFAULTS.hideAfter,
+    branchesWhere: isBranchesWhere(branches.where) ? branches.where : PERSONAL_DEFAULTS.branchesWhere,
+    branchesShow: isBranchesShow(branches.show) ? branches.show : PERSONAL_DEFAULTS.branchesShow,
   }
 }
 
@@ -86,6 +94,8 @@ const PATHS: { [K in keyof Personal]: readonly [string, ...string[]] } = {
   view: ['view'],
   showing: ['subagents', 'showing'],
   hideAfter: ['subagents', 'hideAfter'],
+  branchesWhere: ['branches', 'where'],
+  branchesShow: ['branches', 'show'],
 }
 
 function setAt(raw: Json, path: readonly string[], value: unknown): Json {

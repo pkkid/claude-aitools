@@ -46,6 +46,8 @@ describe('withPersonal', () => {
       mine: 1,
     })
     expect(withPersonal({}, { hideAfter: 5 })).toEqual({ subagents: { hideAfter: 5 } })
+    expect(withPersonal({}, { branchesWhere: 'remote', branchesShow: 'done' })).toEqual({ branches: { where: 'remote', show: 'done' } })
+    expect(personalFrom({ branches: { where: 'local', show: 'nope' } })).toMatchObject({ branchesWhere: 'local', branchesShow: 'all' })
   })
 })
 

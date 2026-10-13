@@ -2,6 +2,7 @@ import type { Elements } from 'claude-code'
 
 import type { AgentCard, AgentKind, AgentRun, AgentShowing, HideAfter } from '../types'
 import { progressBar } from './checklist'
+import { renderPick } from './picks'
 import { NOTE_SHRINK, ago, elapsed } from './format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, RED } from './palette'
 import { TOTEM_HEIGHT, TOTEM_WIDTH, totemAlt, totemSvg } from './totem'
@@ -348,25 +349,6 @@ function renderControls(
         ))}
       </Box>
     </Box>
-  )
-}
-
-/** Behind the picked choice: a Button takes no background, so a Box behind it carries one the white label reads on. */
-const PICKED_BACKGROUND = '#2e2e2c'
-
-/**
- * One choice of an option row, as the bar's own buttons (plain, compact): the one picked at full strength on a grey
- * ground, the rest dim. Pressing the picked one picks it again, changing nothing.
- */
-function renderPick(el: El, key: string, label: string, isPicked: boolean, onPick: () => void) {
-  const { Box, Button } = el
-
-  return isPicked ? (
-    <Box key={`picked-${key}`} backgroundColor={PICKED_BACKGROUND}>
-      <Button key={key} label={label} plain dimColor={false} onPress={() => onPick()} />
-    </Box>
-  ) : (
-    <Button key={key} label={label} plain dimColor onPress={() => onPick()} />
   )
 }
 

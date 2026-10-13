@@ -33,6 +33,23 @@ function band() {
 }
 
 /** The handoff pane's props as a docked desktop pane receives them. */
+type Mounted = {
+  find(query: { key?: string; type?: string; text?: string }): Promise<{ type: string; props: Record<string, unknown>; text: string } | undefined>
+  findAll(query: object): Promise<{ key: string | undefined }[]>
+}
+
+/** A choice as the pane draws it, a plain button as the bar's: `[x] 5` picked (full strength), `[ ] 20` dim. */
+async function pick(view: Mounted, key: string): Promise<string> {
+  const el = await view.find({ key })
+  const isPicked = el?.props.plain === true && el.props.dimColor === false
+  return `${isPicked ? '[x]' : '[ ]'} ${el?.text}`
+}
+
+/** The choices of one row, by key prefix, in order: picked or not. */
+async function picks(view: Mounted, prefix: string): Promise<(string | undefined)[]> {
+  return (await view.findAll({})).map(e => e.key).filter(k => k?.startsWith(prefix))
+}
+
 const PANE = {
   title: 'Handoff brief',
   isFocused: false,
@@ -589,22 +606,6 @@ describe('wiring', () => {
     const DOCK = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, props: PANE }
 
     /** The reads `pick` and `picks` make of a mounted pane. */
-    type Mounted = {
-      find(query: { key?: string; type?: string; text?: string }): Promise<{ type: string; props: Record<string, unknown>; text: string } | undefined>
-      findAll(query: object): Promise<{ key: string | undefined }[]>
-    }
-
-    /** A choice as the pane draws it, a plain button as the bar's: `[x] 5` picked (full strength), `[ ] 20` dim. */
-    async function pick(view: Mounted, key: string): Promise<string> {
-      const el = await view.find({ key })
-      const isPicked = el?.props.plain === true && el.props.dimColor === false
-      return `${isPicked ? '[x]' : '[ ]'} ${el?.text}`
-    }
-
-    /** The choices of one row, by key prefix, in order: picked or not. */
-    async function picks(view: Mounted, prefix: string): Promise<(string | undefined)[]> {
-      return (await view.findAll({})).map(e => e.key).filter(k => k?.startsWith(prefix))
-    }
 
     async function dockText($: Engine): Promise<string> {
       const pane = await $.ui.mount({ ...DOCK, requestId: 'tasks' })
@@ -1409,15 +1410,20 @@ describe('wiring', () => {
     })
   })
 
-  describe('Worktrees', () => {
-    const WT = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, requestId: 'worktrees', props: PANE }
+  describe('Branches', () => {
+    const BR = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, requestId: 'branches', props: PANE }
     const run = (on$: Engine, command: string) =>
       on$.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
 
-    /** A repository with three worktrees besides /p: merged and clean, with changes, and with unpushed commits. */
-    type Repo = { calls: string[]; trees: { path: string; branch: string; changed: string; ahead: string }[] }
+    type Tree = { path: string; branch: string; changed: string; ahead: string }
+    type Ref = { name: string; sha: string; ahead: number; local: boolean; remote: boolean; unpushed?: number }
+    /**
+     * A repository checked out in /p on main, with three worktrees (done, with changes, with unpushed commits) and a
+     * branch only the remote has, merged long ago.
+     */
+    type Repo = { calls: string[]; trees: Tree[]; refs: Ref[] }
 
-    /** Answers git and gh as that repository would, recording each command; removed worktrees leave the list. */
+    /** Answers git and gh as that repository would, recording each command; what is removed leaves it. */
     function fakeRepo(on: On): Repo {
       const repo: Repo = {
         calls: [],
@@ -1427,18 +1433,25 @@ describe('wiring', () => {
           { path: '/p/wt/dirty', branch: 'feat/dirty', changed: ' M a.ts\n?? b.ts\n', ahead: '0' },
           { path: '/p/wt/wip', branch: 'feat/wip', changed: '', ahead: '2' },
         ],
+        refs: [
+          { name: 'main', sha: 'm', ahead: 0, local: true, remote: true },
+          { name: 'feat/done', sha: 'd', ahead: 0, local: true, remote: true },
+          { name: 'feat/dirty', sha: 'y', ahead: 0, local: true, remote: true },
+          { name: 'feat/wip', sha: 'w', ahead: 2, local: true, remote: false },
+          { name: 'old', sha: 'o', ahead: 0, local: false, remote: true },
+        ],
       }
       on('session.cwd', () => ({ value: '/p' }))
       on('tool.call', () => ({ result: 'done' }))
       const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+      const at = Math.floor(NOW / 1000) - 3600
       on('process.run', (_, e) => {
         const [cmd, ...args] = e.argv
         const cwd = e.init?.cwd ?? '/p'
-        const line = `${cmd} ${args.join(' ')}`
-        repo.calls.push(line)
+        repo.calls.push(`${cmd} ${args.join(' ')}`)
         const tree = repo.trees.find(t => t.path === cwd)
         if (cmd === 'gh') {
-          return ok(args[0] === 'pr' ? '[]' : JSON.stringify(repo.trees.map(t => ({ headSha: `sha-${t.branch}`, status: 'completed', conclusion: 'success' }))))
+          return ok(args[0] === 'pr' ? '[]' : JSON.stringify(repo.refs.map(r => ({ headSha: r.sha, status: 'completed', conclusion: 'success' }))))
         }
         switch (args[0]) {
           case 'rev-parse':
@@ -1447,20 +1460,33 @@ describe('wiring', () => {
             return ok('origin/main\n')
           case 'worktree':
             if (args[1] === 'list') {
-              return ok(repo.trees.map(t => `worktree ${t.path}\nHEAD sha-${t.branch}\nbranch refs/heads/${t.branch}\n`).join('\n'))
+              return ok(repo.trees.map(t => `worktree ${t.path}\nHEAD ${repo.refs.find(r => r.name === t.branch)?.sha}\nbranch refs/heads/${t.branch}\n`).join('\n'))
             }
             if (args[1] === 'remove') {
               repo.trees = repo.trees.filter(t => t.path !== args.at(-1))
             }
             return ok()
           case 'for-each-ref':
-            return ok(repo.trees.map(t => `${t.branch}\torigin\trefs/heads/${t.branch}\t${t.ahead === '0' ? '' : `[ahead ${t.ahead}]`}\t${Math.floor(NOW / 1000) - 3600}`).join('\n'))
+            return ok(
+              repo.refs
+                .flatMap(r => [
+                  ...(r.local ? [`refs/heads/${r.name}\t${r.sha}\t${at}\t${r.remote ? `refs/remotes/origin/${r.name}` : ''}\t\t${r.ahead} 0`] : []),
+                  ...(r.remote ? [`refs/remotes/origin/${r.name}\t${r.sha}\t${at}\t\t\t${r.ahead} 0`] : []),
+                ])
+                .join('\n'),
+            )
+          case 'branch':
+            repo.refs = repo.refs.map(r => (r.name === args.at(-1) ? { ...r, local: false } : r))
+            return ok()
+          case 'push':
+            repo.refs = repo.refs.map(r => (r.name === args.at(-1) ? { ...r, remote: false } : r))
+            return ok()
           case 'status':
             return ok(tree?.changed ?? '')
           case 'rev-list':
-            return ok(`${tree?.ahead ?? '0'}\n`)
+            return ok(args[1] === '--first-parent' ? 'm\n' : `${tree?.ahead ?? '0'}\n`)
           case 'merge-base':
-            return ok('base\n')
+            return ok('m\n')
           case 'diff':
             return ok(' 2 files changed, 10 insertions(+), 3 deletions(-)\n')
           default:
@@ -1472,14 +1498,14 @@ describe('wiring', () => {
     }
 
     async function paneText($: Engine): Promise<string> {
-      const pane = await $.ui.mount(WT)
+      const pane = await $.ui.mount(BR)
       const text = (await pane.findAll({ type: 'Text' })).map(t => t.text).join('')
       await pane.unmount()
 
       return text
     }
 
-    test('nothing is read while the pane is closed; open, it reads git and GitHub, and keeps reading', async ($, on) => {
+    test('nothing is read while the pane is closed; open, it fetches and reads git and GitHub, and keeps reading', async ($, on) => {
       const repo = fakeRepo(on)
       // The project row looks for a GitHub remote whether the pane is open or not; those reads are its own.
       const rowCalls = new Set(['git rev-parse --show-toplevel', 'git rev-parse --path-format=absolute --git-common-dir', 'git remote -v'])
@@ -1487,19 +1513,21 @@ describe('wiring', () => {
       await start($, on, { usd: 0 })
       await clock.advance(60_000)
       expect(paneCalls()).toEqual([])
-      expect((await run($, 'worktrees')).text).toBe('Worktrees open.')
+      expect((await run($, 'branches')).text).toBe('Branches open.')
       await clock.settle()
       expect(repo.calls).toContain('git worktree list --porcelain')
+      expect(repo.calls).toContain('git fetch --prune --quiet origin')
       expect(repo.calls.some(c => c.startsWith('gh pr list'))).toBe(true)
       const text = await paneText($)
-      expect(text).toContain('3 worktrees · 1 to prune · 1 with changes · 1 unpushed')
-      expect(text).toContain('feat/dirty · 2 changed files')
+      expect(text).toContain('5 branches · 3 worktrees · 2 done')
+      expect(text).toContain('Clean up removes 2 done branches: 1 worktree, 1 local and 2 remote branches.')
+      expect(text).toContain('feat/dirty · 2 changed')
+      expect(text).toContain('feat/wip · 2 unpushed')
       expect(text).toContain('+10−3')
-      expect(text).toContain('✓')
       const reads = repo.calls.length
       await clock.advance(10_000)
       expect(repo.calls.length).toBeGreaterThan(reads)
-      expect((await run($, 'worktrees')).text).toBe('Worktrees closed.')
+      expect((await run($, 'branches')).text).toBe('Branches closed.')
       const closed = paneCalls().length
       await clock.advance(120_000)
       await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
@@ -1507,25 +1535,26 @@ describe('wiring', () => {
       expect(paneCalls().length).toBe(closed)
     })
 
-    test('GitHub is read on open and every 5 minutes after; Refresh reads it now and restarts the wait', async ($, on) => {
+    test('GitHub and a fetch on open and every 5 minutes after; Refresh does both now and restarts the wait', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
       const prLists = () => repo.calls.filter(c => c.startsWith('gh pr list')).length
-      expect(prLists()).toBe(1)
+      const fetches = () => repo.calls.filter(c => c.startsWith('git fetch')).length
+      expect([prLists(), fetches()]).toEqual([1, 1])
       await clock.advance(4 * 60_000 + 50_000)
       expect(prLists()).toBe(1)
       await clock.advance(10_000)
-      expect(prLists()).toBe(2)
+      expect([prLists(), fetches()]).toEqual([2, 2])
       await clock.advance(2 * 60_000)
-      const pane = await $.ui.mount({ plugin: 'aitools', surface: 'desktop', component: 'Pane', requestId: 'worktrees', props: { ...PANE, title: 'Worktrees' } })
+      const pane = await $.ui.mount(BR)
       const keys = (await pane.findAll({ type: 'Button' })).map(b => b.key)
       expect(keys.slice(keys.indexOf('clean'), keys.indexOf('clean') + 2)).toEqual(['clean', 'refresh'])
       await pane.press({ key: 'refresh' })
       await clock.settle()
       await pane.unmount()
-      expect(prLists()).toBe(3)
+      expect([prLists(), fetches()]).toEqual([3, 3])
       await clock.advance(4 * 60_000 + 50_000)
       expect(prLists()).toBe(3)
       await clock.advance(10_000)
@@ -1535,7 +1564,7 @@ describe('wiring', () => {
     test('a tool that changes files reads the open pane again shortly after', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
       const lists = () => repo.calls.filter(c => c === 'git worktree list --porcelain').length
       const before = lists()
@@ -1545,46 +1574,48 @@ describe('wiring', () => {
       expect(lists()).toBe(before + 1)
     })
 
-    test('Clean asks first, then removes only the merged clean worktree, its branch and remote branch', async ($, on) => {
+    test('Clean up asks first, then removes only the done branches: worktree, local and remote branch', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
-      const pane = await $.ui.mount(WT)
+      const pane = await $.ui.mount(BR)
+      expect((await pane.find({ type: 'Button', key: 'clean' }))?.text).toBe('Clean up 2 done')
       await pane.press({ key: 'clean' })
-      expect(await pane.find({ text: 'Remove 1 worktree and their branches?' })).toBeDefined()
-      expect(repo.calls.some(c => c.includes('remove'))).toBe(false)
+      expect(await pane.find({ text: 'Remove 1 worktree, 1 local and 2 remote branches?' })).toBeDefined()
+      expect(repo.calls.some(c => /remove|branch -D|push/.test(c))).toBe(false)
       await pane.press({ key: 'clean-yes' })
       await clock.settle()
       expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd sweeping up')
       expect(repo.calls).toContain('git worktree remove /p/wt/done')
       expect(repo.calls).toContain('git branch -D feat/done')
       expect(repo.calls).toContain('git push origin --delete feat/done')
+      expect(repo.calls).toContain('git push origin --delete old')
       expect(repo.calls.filter(c => c.includes('dirty') || c.includes('wip')).filter(c => /remove|branch -D|push/.test(c))).toEqual([])
       await clock.advance(3000)
-      expect(await pane.find({ text: 'Removed 1 worktree with 1 branch and 1 remote branch.' })).toBeDefined()
-      expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd pruning a tree')
+      expect(await pane.find({ text: 'Removed 1 worktree, 1 local branch, 2 remote branches.' })).toBeDefined()
+      expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd asleep under a tree')
       await pane.unmount()
     })
 
-    test("deleting a row with unpushed commits warns, forces, and keeps its remote branch", async ($, on) => {
+    test('deleting a row with unpushed commits says what it takes and loses, then forces', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
-      const pane = await $.ui.mount(WT)
-      expect(await pane.find({ key: 'delete-/p' })).toBeUndefined()
-      await pane.press({ key: 'delete-/p/wt/wip' })
-      expect(await pane.find({ text: 'Delete feat/wip and its branch?' })).toBeDefined()
-      expect(await pane.find({ text: 'This loses 2 unpushed commits. origin/feat/wip is kept.' })).toBeDefined()
-      await pane.press({ key: 'delete-no-/p/wt/wip' })
-      expect(await pane.find({ key: 'delete-yes-/p/wt/wip' })).toBeUndefined()
+      const pane = await $.ui.mount(BR)
+      expect(await pane.find({ key: 'delete-main' })).toBeUndefined()
+      await pane.press({ key: 'delete-feat/wip' })
+      expect(await pane.find({ text: 'Delete feat/wip (worktree and local branch)?' })).toBeDefined()
+      expect(await pane.find({ text: 'This loses 2 commits not on the base branch.' })).toBeDefined()
+      await pane.press({ key: 'delete-no-feat/wip' })
+      expect(await pane.find({ key: 'delete-yes-feat/wip' })).toBeUndefined()
       // × again takes the question back.
-      await pane.press({ key: 'delete-/p/wt/wip' })
-      await pane.press({ key: 'delete-/p/wt/wip' })
-      expect(await pane.find({ key: 'delete-yes-/p/wt/wip' })).toBeUndefined()
-      await pane.press({ key: 'delete-/p/wt/wip' })
-      await pane.press({ key: 'delete-yes-/p/wt/wip' })
+      await pane.press({ key: 'delete-feat/wip' })
+      await pane.press({ key: 'delete-feat/wip' })
+      expect(await pane.find({ key: 'delete-yes-feat/wip' })).toBeUndefined()
+      await pane.press({ key: 'delete-feat/wip' })
+      await pane.press({ key: 'delete-yes-feat/wip' })
       await clock.advance(3000)
       expect(repo.calls).toContain('git worktree remove --force /p/wt/wip')
       expect(repo.calls).toContain('git branch -D feat/wip')
@@ -1592,56 +1623,79 @@ describe('wiring', () => {
       await pane.unmount()
     })
 
+    test('the filters: Local or Remote, then Done or Active', async ($, on) => {
+      fakeRepo(on)
+      await start($, on, { usd: 0 })
+      await run($, 'branches')
+      await clock.settle()
+      const pane = await $.ui.mount(BR)
+      const names = async () =>
+        (await pane.findAll({ type: 'Text' })).map(t => t.text).filter(t => /^(main|feat\/[a-z]+|old)$/.test(t))
+      expect(await picks(pane, 'where-')).toEqual(['where-both', 'where-local', 'where-remote'])
+      expect(await picks(pane, 'show-')).toEqual(['show-all', 'show-active', 'show-done'])
+      expect(await names()).toEqual(['main', 'feat/done', 'feat/dirty', 'feat/wip', 'old'])
+      await pane.press({ key: 'where-remote' })
+      expect(await names()).toEqual(['main', 'feat/done', 'feat/dirty', 'old'])
+      await pane.press({ key: 'show-done' })
+      expect(await names()).toEqual(['feat/done', 'old'])
+      await pane.press({ key: 'where-local' })
+      expect(await names()).toEqual(['feat/done'])
+      expect(await pick(pane, 'where-local')).toBe('[x] Local')
+      await pane.unmount()
+    })
+
     test('every row keeps its columns the same width, with or without a delete button, asking or not', async ($, on) => {
       fakeRepo(on)
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
-      const pane = await $.ui.mount(WT)
-      await pane.press({ key: 'delete-/p/wt/wip' })
+      const pane = await $.ui.mount(BR)
+      await pane.press({ key: 'delete-feat/wip' })
       const cells = await pane.findAll({ type: 'Box' })
       const widths = (key: string) => cells.filter(b => b.props.key === key).map(b => b.props.width)
-      for (const [key, width] of [['age', 5], ['added', 8], ['removed', 7], ['ci', 3], ['delete', 3]] as const) {
-        expect(widths(key)).toEqual([width, width, width, width])
+      // The titles' row too, for the columns it names; then one per branch.
+      for (const [key, width] of [['on', 8], ['out', 13], ['age', 5], ['pr', 7], ['ci', 4], ['delete', 3]] as const) {
+        expect(widths(key)).toEqual(Array(6).fill(width))
       }
-      // The main checkout is the first row even though it is not the newest.
-      const names = (await pane.findAll({ type: 'Text' })).map(t => t.text).filter(t => /^(main|feat\/)/.test(t))
-      expect(names[0]).toBe('main')
+      for (const [key, width] of [['added', 8], ['removed', 7]] as const) {
+        expect(widths(key)).toEqual(Array(5).fill(width))
+      }
       await pane.unmount()
     })
 
     test("a row's name and note are drawn whole, for the layout to cut at the pane's edge, the note first", async ($, on) => {
       const repo = fakeRepo(on)
       repo.trees[3]!.branch = 'feat/a-very-long-branch-name-about-owl-mascot-guest-avatars'
+      repo.refs[3]!.name = 'feat/a-very-long-branch-name-about-owl-mascot-guest-avatars'
       await start($, on, { usd: 0 })
-      await run($, 'worktrees')
+      await run($, 'branches')
       await clock.settle()
-      const pane = await $.ui.mount(WT)
+      const pane = await $.ui.mount(BR)
       const texts = await pane.findAll({ type: 'Text' })
       const long = texts.find(t => t.text.startsWith('feat/a-very-long-branch-name-about-owl-mascot-guest-avatars'))
       expect(long?.props.wrap).toBe('truncate-end')
-      expect(texts.map(t => t.text)).toContain('feat/dirty')
-      const note = texts.find(t => t.text === ' · 2 changed files · merged')
+      const note = texts.find(t => t.text === ' · 2 changed')
       expect(note?.props.wrap).toBe('truncate-end')
       const boxes = await pane.findAll({ type: 'Box' })
       expect(boxes.some(b => b.props.flexShrink === NOTE_SHRINK && b.props.minWidth === 0)).toBe(true)
       await pane.unmount()
     })
 
-    test("the 🛠 menu's Worktrees opens the pane; with none but the main checkout Clawd naps", async ($, on) => {
+    test("the 🛠 menu's Branches opens the pane; with nothing to clean up Clawd naps", async ($, on) => {
       const repo = fakeRepo(on)
       repo.trees = repo.trees.slice(0, 1)
+      repo.refs = repo.refs.slice(0, 1)
       const panes = await start($, on, { usd: 0 })
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'worktrees' }))?.text).toBe('Worktrees')
-      await ui.press({ key: 'worktrees' })
+      expect((await ui.find({ key: 'branches' }))?.text).toBe('Branches')
+      await ui.press({ key: 'branches' })
       await ui.unmount()
-      expect(panes.open.has('worktrees')).toBe(true)
+      expect(panes.open.has('branches')).toBe(true)
       await clock.settle()
-      const pane = await $.ui.mount(WT)
+      const pane = await $.ui.mount(BR)
       expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd asleep under a tree')
-      expect(await pane.find({ text: 'No worktrees besides the main checkout.' })).toBeDefined()
+      expect(await pane.find({ text: "Nothing to clean up: every branch has work that isn't on main yet." })).toBeDefined()
       await pane.unmount()
     })
   })

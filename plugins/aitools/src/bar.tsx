@@ -253,7 +253,7 @@ export function renderBar(
     openNotes(): void
     setView(mode: ViewMode): void
     openDock(): void
-    openWorktrees(): void
+    openBranches(): void
     openProject(): void
     /** ⁝: opens or closes the AI Tool Settings pane. */
     toggleSettings(): void
@@ -323,7 +323,7 @@ export function renderBar(
         />
         <Button key="notes" label="Notes" {...QUIET} onPress={() => on.openNotes()} />
         <Button key="tasks" label="Tasks" {...QUIET} onPress={() => on.openDock()} />
-        <Button key="worktrees" label="Worktrees" {...QUIET} onPress={() => on.openWorktrees()} />
+        <Button key="branches" label="Branches" {...QUIET} onPress={() => on.openBranches()} />
         {flags.hasRepo && <Button key="project" label="Project" {...QUIET} onPress={() => on.openProject()} />}
         {VIEWS.map(v => (
           <Button
