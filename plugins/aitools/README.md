@@ -59,7 +59,7 @@ Project Settings  Saved for vowelit only
 ● Show project row  The row in vowelit
   Name              [Vowelit                                   ]
                     In place of the repo's name
-● Board link        The GitHub Project board, on the row
+● Board             Its open items on the row, and the Project pane
   Board URL         [https://github.com/users/pkkid/projects/1 ]
   Tools             Server · Test · Docs. Edit project.tools in the file.
 ```
@@ -365,21 +365,23 @@ rest works. Closed, it reads nothing.
 In a GitHub repository a second row sits under the bar, for the project the session works in:
 
 ```
-Vowelit  3 tasks  Project  #42 Login fails on Safari                 ● Running feat/42-login  Stop Server  Docs
+Vowelit  Project: 3 items  2 tasks  #42 Login fails on Safari       ● Running feat/42-login  Stop Server  Docs
 ```
 
-On the left (the links open in your browser):
+On the left:
 
 - **The repository's name**, as GitHub has it, from the main checkout's GitHub remote (`origin` first),
-  opening the repository. `name` in the project file shows a name of your own instead, as written.
-- **`3 tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
-- **Project**: the repository's GitHub Project board, when exactly one is linked to it. It's looked up once a day
+  opening the repository in your browser. `name` in the project file shows a name of your own instead, as written.
+- **`Project: 3 items`**: how many items are open on the repository's GitHub Project board (as the
+  [Project pane](#project-pane)'s Open filter counts them), while any is; it opens the Project pane, whose **Open in
+  GitHub** opens the board. The board is the one linked to the repository, when exactly one is, looked up once a day
   through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
-  in the project file.
+  in the project file. Its items are read every 5 minutes while the row shows (see the Project pane).
+- **`2 tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
 - **The issue** the session is about: the first `#123` or `…/issues/123` in the session's first prompt (the context
   Claude Code adds to it is left out), else a number the branch is named for: `feat/123-login`, `123-fix`,
   `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
-  from GitHub, one call per issue, kept.
+  from GitHub, one call per issue, kept. It opens the issue in your browser.
 
 Outside a GitHub repository there is no row. **Show project row** under the settings pane's Global Settings hides it
 in every project (saved to the settings file), as `/aitools project on|off` does from the prompt; the one under
@@ -445,8 +447,9 @@ dim line in the chat saying why; the rest of the row still shows.
 
 ## Project pane
 
-**Project** in the **🛠** menu opens a pane listing the items on the repository's GitHub Project board (the one the
-project row links to), in board order:
+**Project** in the **🛠** menu, or the project row's `Project: 3 items`, opens a pane listing the items on the
+repository's GitHub Project board: open ones first, each Status column in the board's order, the most recently
+changed first within a column:
 
 ```
 Vowelit  Open in GitHub  3 items · updated 2m ago                                    [Clawd]
@@ -465,10 +468,15 @@ draft Idea: daily puzzle mode                               ○ Todo
 - Where SVG is drawn (the desktop), Clawd stacks task blocks top left; he sleeps by the finished tower when nothing is
   open, and scratches his head at a fallen one when there is no board to read.
 
-The board is read with **one** GitHub API query (the first 100 items, through `gh`, which needs the `read:project`
-scope) when the pane opens, then every 5 minutes while it stays open. A read under 5 minutes old is kept, so closing
-and opening the pane again, or a reload, asks GitHub nothing. **Refresh** reads now and starts the 5 minutes over.
-Closed, it reads nothing. With no board linked, name one as `project.board` in `.claude/aitools.json`.
+The board is read with **one** GitHub API query (through `gh`, which needs the `read:project` scope). GitHub can only
+list a board's items in board order, so the query filters instead: up to 100 items not in a done column, and up to 100
+done ones changed in the last 30 days; the pane sorts them as above and keeps the first 100. The note beside **Open in
+GitHub** says `95 of 140 items` when the board holds more than that.
+
+It is read when the pane opens or the session starts with the project row showing, then every 5 minutes while either
+holds. A read under 5 minutes old is kept and shared by every session, so opening the pane, a reload, or another chat
+in the same project asks GitHub nothing. **Refresh** reads now and starts the 5 minutes over. With the pane closed and
+the project row hidden, it reads nothing. With no board linked, name one as `project.board` in `.claude/aitools.json`.
 
 ## How thread cost % is estimated
 

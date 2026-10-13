@@ -1818,11 +1818,17 @@ describe('wiring', () => {
           projectV2: {
             title: 'Vowelit',
             url: 'https://github.com/users/pkkid/projects/1',
-            items: {
-              totalCount: 3,
+            all: { totalCount: 3 },
+            field: { options: [{ name: 'Todo' }, { name: 'In Progress' }, { name: 'Done' }] },
+            open: {
+              totalCount: 2,
               nodes: [
                 { type: 'ISSUE', status: { name: 'In Progress' }, content: { number: 181, title: 'Lobby: show who is ready', url: 'https://github.com/pkkid/vowelit/issues/181', state: 'OPEN', repository: { nameWithOwner: 'pkkid/vowelit' }, closedByPullRequestsReferences: { nodes: [{ number: 183, url: 'https://github.com/pkkid/vowelit/pull/183', state: 'OPEN' }] } } },
                 { type: 'DRAFT_ISSUE', status: { name: 'Todo' }, content: { title: 'Idea: daily puzzle' } },
+              ],
+            },
+            done: {
+              nodes: [
                 { type: 'ISSUE', status: { name: 'Done' }, content: { number: 170, title: 'Admin page', url: 'https://github.com/pkkid/vowelit/issues/170', state: 'CLOSED', repository: { nameWithOwner: 'pkkid/vowelit' }, closedByPullRequestsReferences: { nodes: [] } } },
               ],
             },
@@ -1882,15 +1888,15 @@ describe('wiring', () => {
       expect(await rowText($)).toEqual({})
     })
 
-    test("the repository's name, its board and the first prompt's issue, each opening in the browser", async ($, on) => {
+    test("the repository's name and the first prompt's issue open in the browser; the board's open items, its pane", async ($, on) => {
       const w = world(on)
       on('prompt.submit', (_, e) => ({ text: e.text }))
-      await start($, on, { usd: 0 })
+      const panes = await start($, on, { usd: 0 })
       await say($, 'Please fix #42 today')
       await say($, 'and #50 too')
       const row = await rowText($)
       expect(row['project-name']).toBe('vowelit')
-      expect(row['project-board']).toBe('Project')
+      expect(row['project-board']).toBe('Project: 2 items')
       expect(row['project-issue']).toBe('#42 Issue 42 title')
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'project-name' })
@@ -1898,7 +1904,21 @@ describe('wiring', () => {
       await ui.press({ key: 'project-issue' })
       await ui.unmount()
       await clock.settle()
-      expect(w.opened).toEqual(['https://github.com/pkkid/vowelit', 'https://github.com/users/pkkid/projects/1', 'https://github.com/pkkid/vowelit/issues/42'])
+      expect(w.opened).toEqual(['https://github.com/pkkid/vowelit', 'https://github.com/pkkid/vowelit/issues/42'])
+      expect(panes.open.has('project')).toBe(true)
+    })
+
+    test("the row's count is read every 5 minutes with the pane closed, and not at all once the row is hidden", async ($, on) => {
+      const w = world(on)
+      const reads = () => w.calls.filter(c => c.includes('login=pkkid')).length
+      await start($, on, { usd: 0 })
+      expect(reads()).toBe(1)
+      await clock.advance(5 * 60_000)
+      expect(reads()).toBe(2)
+      await $.command.run({ command: 'aitools', args: 'project off', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+      await clock.advance(15 * 60_000)
+      expect(reads()).toBe(2)
+      expect((await rowText($))['project-board']).toBeUndefined()
     })
 
     test('while background tasks run, the row counts them after the name; pressing it opens their pane', async ($, on) => {
@@ -2010,7 +2030,8 @@ describe('wiring', () => {
       test('the 🛠 menu opens it; one query shows the open items with their status and PR, and Clawd stacking', async ($, on) => {
         const w = world(on)
         const { opened } = await start($, on, { usd: 0 })
-        expect(reads(w)).toBe(0)
+        // The project row's count reads the board once; the pane opens on that read.
+        expect(reads(w)).toBe(1)
         await openPane($)
         expect(opened).toContain('project')
         expect(reads(w)).toBe(1)

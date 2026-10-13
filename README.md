@@ -46,8 +46,9 @@ left of **🛠**. Pressing it runs `/askme`.
 
 ### Project row
 
-In a GitHub repository a second row shows the project you're working on: the repository's name, its GitHub Project
-board, and the issue the session is about (from your first message, or the branch name), each opening in your browser.
+In a GitHub repository a second row shows the project you're working on: the repository's name and the issue the
+session is about (from your first message, or the branch name), each opening in your browser, and how many items are
+open on its GitHub Project board (`Project: 3 items`, opening the Project pane).
 On the right go the tools your project's own `.claude/aitools.json` defines: links, commands such as tests, and
 servers with a status and a Start/Stop button. See [the project row](plugins/aitools/README.md#project-row) for the
 file.

@@ -220,10 +220,16 @@ export type BoardItem = {
   status: string | null
   /** The pull request it links to: itself for one, else the one picked from those that close it. */
   pr: { number: number; url: string } | null
+  /** When the item last changed on the board, in milliseconds; null when GitHub did not say. */
+  updatedAt: number | null
 }
 
 /** What one read of the board found: its title and URL, its first items and how many it has in all. */
-export type BoardData = { title: string; url: string; total: number; items: BoardItem[] }
+/**
+ * A read of the board: `total` counts every item on it, `open` the open ones (absent in a read kept from before it
+ * was counted), and `items` the ones read, open ones first.
+ */
+export type BoardData = { title: string; url: string; total: number; open?: number; items: BoardItem[] }
 
 /**
  * The Project pane's contents: `source` is the board URL read, `at` when, and `error` why the read after it failed.

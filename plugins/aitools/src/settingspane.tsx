@@ -256,8 +256,8 @@ export function renderSettings(el: El, view: SettingsView, on: SettingsActions) 
       row(
         el,
         'project-board-link',
-        optionButton(el, 'project-board-link', 'Board link', board !== false, () => on.setProject({ board: board === false ? null : false })),
-        'The GitHub Project board, on the row',
+        optionButton(el, 'project-board-link', 'Board', board !== false, () => on.setProject({ board: board === false ? null : false })),
+        'Its open items on the row, and the Project pane',
       ),
     )
     if (board !== false) {

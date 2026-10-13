@@ -1,6 +1,6 @@
 /**
  * The Project pane: the GitHub Project board's items, each with its id, title, Status and pull request, read with one
- * GraphQL query at most every BOARD_REFRESH_MS while the pane is open. A header links to the board and filters the
+ * GraphQL query at most every BOARD_REFRESH_MS while the pane is open or the project row shows the open count. A header links to the board and filters the
  * items to the open ones, the done ones or all; where SVG is drawn, Clawd stacks task blocks at the top left.
  */
 
@@ -16,14 +16,34 @@ export const PROJECT_PANE = 'project'
 /** How often the open pane reads the board, and how long a read stays fresh across closing and reopening it. */
 export const BOARD_REFRESH_MS = 5 * 60_000
 
-/** How many items one read fetches: GitHub's most for one page, so a read stays one query. */
+/** How many items a read keeps: GitHub's most for one page. */
 export const BOARD_PAGE = 100
 
+/** The Status names that mean done, as the board filter and isDone both read them. */
+export const DONE_STATUSES = ['Done', 'Closed', 'Complete', 'Completed', 'Finished', 'Shipped', 'Merged'] as const
+
+/** How far back a read looks for done items: the most recently changed are the ones worth listing. */
+export const DONE_WINDOW_DAYS = 30
+
+const ITEM_FIELDS =
+  'type updatedAt status:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} ' +
+  'content{... on DraftIssue{title} ... on Issue{number title url state repository{nameWithOwner} ' +
+  'closedByPullRequestsReferences(first:3,includeClosedPrs:true){nodes{number url state}}} ' +
+  '... on PullRequest{number title url state repository{nameWithOwner}}}'
+
 /**
- * The board, its first BOARD_PAGE items in board order, each item's Status, and for an issue the pull requests that
- * close it. `repositoryOwner` takes a user's login or an organization's, so either kind of board is one query.
+ * The board in one query: its item count, its Status columns in order, up to BOARD_PAGE items not in a done column,
+ * and up to BOARD_PAGE done ones changed in the last DONE_WINDOW_DAYS days. GitHub sorts items only by their position
+ * on the board, so the query picks them by filter and the read sorts them (sortItems). `repositoryOwner` takes a
+ * user's login or an organization's, so either kind of board is one query.
  */
-export const BOARD_QUERY = `query($login:String!,$number:Int!){repositoryOwner(login:$login){... on ProjectV2Owner{projectV2(number:$number){title url items(first:${BOARD_PAGE},orderBy:{field:POSITION,direction:ASC}){totalCount nodes{type status:fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{... on DraftIssue{title} ... on Issue{number title url state repository{nameWithOwner} closedByPullRequestsReferences(first:3,includeClosedPrs:true){nodes{number url state}}} ... on PullRequest{number title url state repository{nameWithOwner}}}}}}}}}`
+export const BOARD_QUERY =
+  'query($login:String!,$number:Int!){repositoryOwner(login:$login){... on ProjectV2Owner{projectV2(number:$number){' +
+  'title url all:items(first:0){totalCount} ' +
+  'field(name:"Status"){... on ProjectV2SingleSelectField{options{name}}} ' +
+  `open:items(first:${BOARD_PAGE},query:"-status:${DONE_STATUSES.join(',')}"){totalCount nodes{${ITEM_FIELDS}}} ` +
+  `done:items(first:${BOARD_PAGE},query:"status:${DONE_STATUSES.join(',')} updated:>@today-${DONE_WINDOW_DAYS}d"){nodes{${ITEM_FIELDS}}}` +
+  '}}}}'
 
 /** A Project board's owner and number from its URL: `https://github.com/users/<login>/projects/<n>`, or `/orgs/`. */
 export function parseBoardUrl(url: string): { login: string; number: number } | null {
@@ -46,15 +66,17 @@ const STATES: ReadonlySet<string> = new Set(['OPEN', 'CLOSED', 'MERGED'])
 
 /** One item from the query's answer; null for one it cannot show (content the person may not read). */
 function toItem(node: unknown): BoardItem | null {
-  const n = (node ?? {}) as { type?: unknown; status?: { name?: unknown } | null; content?: Record<string, unknown> | null }
+  const n = (node ?? {}) as { type?: unknown; updatedAt?: unknown; status?: { name?: unknown } | null; content?: Record<string, unknown> | null }
   const content = n.content ?? {}
   const title = typeof content.title === 'string' ? content.title : null
   if (title === null) {
     return null
   }
   const status = typeof n.status?.name === 'string' ? n.status.name : null
+  const updated = typeof n.updatedAt === 'string' ? Date.parse(n.updatedAt) : Number.NaN
+  const updatedAt = Number.isFinite(updated) ? updated : null
   if (n.type === 'DRAFT_ISSUE') {
-    return { kind: 'draft', number: null, repo: null, title, url: null, state: null, status, pr: null }
+    return { kind: 'draft', number: null, repo: null, title, url: null, state: null, status, pr: null, updatedAt }
   }
   const number = typeof content.number === 'number' ? content.number : null
   const url = typeof content.url === 'string' ? content.url : null
@@ -78,7 +100,23 @@ function toItem(node: unknown): BoardItem | null {
     state,
     status,
     pr: isPr ? { number, url } : pickPr(prs),
+    updatedAt,
   }
+}
+
+/**
+ * The items as the pane lists them: open ones before done ones, each by its Status column in the board's order
+ * (`columns`; one with no Status, or a column the board no longer has, after them), the most recently changed first.
+ */
+export function sortItems(items: readonly BoardItem[], columns: readonly string[]): BoardItem[] {
+  const column = (item: BoardItem) => {
+    const at = item.status === null ? -1 : columns.indexOf(item.status)
+    return at < 0 ? columns.length : at
+  }
+
+  return [...items].sort(
+    (a, b) => Number(isDone(a)) - Number(isDone(b)) || column(a) - column(b) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+  )
 }
 
 /** The query's answer as the pane shows it, or why it holds no board. */
@@ -89,29 +127,37 @@ export function parseBoardItems(json: string): { data: BoardData } | { error: st
   } catch {
     return { error: "GitHub's answer wasn't JSON" }
   }
+  type Items = { totalCount?: unknown; nodes?: unknown } | null | undefined
   const answer = raw as { data?: { repositoryOwner?: { projectV2?: unknown } | null }; errors?: { message?: unknown }[] }
   const project = answer.data?.repositoryOwner?.projectV2 as
-    | { title?: unknown; url?: unknown; items?: { totalCount?: unknown; nodes?: unknown } }
+    | { title?: unknown; url?: unknown; all?: Items; open?: Items; done?: Items; field?: { options?: unknown } | null }
     | null
     | undefined
   if (!project) {
     const message = answer.errors?.find(e => typeof e.message === 'string')?.message
     return { error: typeof message === 'string' ? message : 'GitHub found no such Project board' }
   }
-  const nodes = Array.isArray(project.items?.nodes) ? project.items.nodes : []
-  const items = nodes.map(toItem).filter((item): item is BoardItem => item !== null)
+  const read = (list: Items) => (Array.isArray(list?.nodes) ? list.nodes : []).map(toItem).filter((item): item is BoardItem => item !== null)
+  const open = read(project.open)
+  const done = read(project.done)
+  const options = Array.isArray(project.field?.options) ? project.field.options : []
+  const columns = options.map(o => (o as { name?: unknown })?.name).filter((name): name is string => typeof name === 'string')
+  const items = sortItems([...open, ...done], columns).slice(0, BOARD_PAGE)
+  // The open filter also brings items with no Status whose issue is closed: they count as done.
+  const openCount = typeof project.open?.totalCount === 'number' ? project.open.totalCount - open.filter(isDone).length : undefined
 
   return {
     data: {
       title: typeof project.title === 'string' ? project.title : 'Project',
       url: typeof project.url === 'string' ? project.url : '',
-      total: typeof project.items?.totalCount === 'number' ? project.items.totalCount : items.length,
+      total: typeof project.all?.totalCount === 'number' ? project.all.totalCount : items.length,
+      open: openCount,
       items,
     },
   }
 }
 
-const DONE_STATUS = /^(done|closed|complete|completed|finished|shipped|merged)$/i
+const DONE_STATUS = new RegExp(`^(${DONE_STATUSES.join('|')})$`, 'i')
 
 /** Whether an item counts as done: its Status says so, or with no Status, its issue or pull request is closed. */
 export function isDone(item: BoardItem): boolean {
@@ -175,7 +221,7 @@ export function towerMode(board: BoardState): TowerMode {
 /** The header's faint note: how many items (and how many a read fetched, when fewer), and how long since the read. */
 export function metaText(data: BoardData, at: number, now: number): string {
   const count =
-    data.total > data.items.length ? `first ${data.items.length} of ${data.total} items` : `${data.total} ${data.total === 1 ? 'item' : 'items'}`
+    data.total > data.items.length ? `${data.items.length} of ${data.total} items` : `${data.total} ${data.total === 1 ? 'item' : 'items'}`
   const ago = age(now - at)
 
   return `${count} · updated ${ago === 'now' ? 'just now' : `${ago} ago`}`

@@ -26,7 +26,7 @@ import {
 } from '../src/agentdock'
 import type { EndStatus } from '../src/agentdock'
 import { CACHE_TTL, renderBar } from '../src/bar'
-import { BOARD_QUERY, BOARD_REFRESH_MS, PROJECT_PANE, parseBoardItems, parseBoardUrl, renderBoard } from '../src/board'
+import { BOARD_QUERY, BOARD_REFRESH_MS, PROJECT_PANE, filterCounts, parseBoardItems, parseBoardUrl, renderBoard } from '../src/board'
 import { price } from '../src/pricing'
 import {
   CHECKLIST_SPEC,
@@ -219,7 +219,10 @@ let worktreeBase: string | null = null
 /** GitHub's word, as last read: pull requests by branch and CI by commit. Dropped when the pane closes. */
 let githubPrs = new Map<string, PrFacts[]>()
 let githubRuns = new Map<string, CiState>()
-/** The Project pane's next read of the board, BOARD_REFRESH_MS after the last; armed only while the pane is open. */
+/**
+ * The board's next read, BOARD_REFRESH_MS after the last; armed only while the Project pane is open or the project row
+ * shows its open count.
+ */
 let boardTimer: Timer | null = null
 /** The board read in flight: a read asked for meanwhile is dropped, since this one brings the same. */
 let boardReading: Promise<void> | null = null
@@ -488,8 +491,9 @@ async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTI
     await catchUp($, key)
   }
   if (key === 'projectRow') {
-    // Its servers' ports are read only while the row shows.
+    // Its servers' ports, and its board's items, are read only while the row shows.
     syncListenerPoll($)
+    syncBoardReads($)
   }
 }
 
@@ -1492,6 +1496,7 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
     await startView($, p.view)
   }
   syncListenerPoll($)
+  syncBoardReads($)
 }
 
 /**
@@ -1546,6 +1551,7 @@ async function loadProject($: EngineInterface): Promise<void> {
   }
   await refreshBoard($)
   syncListenerPoll($)
+  syncBoardReads($)
 }
 
 /** Both files again: every 30 seconds, when ⁝ opens, and after Claude edits one. */
@@ -1631,8 +1637,8 @@ type BoardCache = Record<string, { at: number; url: string | null }>
 async function refreshBoard($: EngineInterface): Promise<void> {
   const was = await read($, boardUrl)
   await lookUpBoard($)
-  // A board changed while the Project pane shows the old one: the new one's items, from the store if fresh.
-  if ((await read($, boardUrl)) !== was && (await read($, isBoardOpen))) {
+  // A board changed while its items are read: the new one's items, from the store if fresh.
+  if ((await read($, boardUrl)) !== was && (await isBoardWanted($))) {
     await loadBoardItems($, false)
   }
 }
@@ -1679,20 +1685,39 @@ async function lookUpBoard($: EngineInterface): Promise<void> {
   await update($, boardUrl, () => url)
 }
 
-// ---- The Project pane: the board's items ----
+// ---- The board's items: the Project pane's list, and the project row's open count ----
 
 /** How long a read of a board's items is kept in the store: past this it is dropped, whatever its board. */
 const BOARD_ITEMS_KEEP_MS = 24 * 60 * 60_000
 
 type BoardItemsCache = Record<string, { at: number; data: BoardData }>
 
-/** Sets the pane's one timer: its next read, `ms` from now. */
+/**
+ * Sets the board's one timer: its next read, `ms` from now. The read takes the store's copy when another session read
+ * the board since, so sessions open side by side read it once between them.
+ */
 function armBoardTimer($: EngineInterface, ms: number): void {
   boardTimer?.cancel()
   boardTimer = $.clock.after(Math.max(1000, ms), () => {
     boardTimer = null
-    void loadBoardItems($, true)
+    void loadBoardItems($, false)
   })
+}
+
+/** Whether the board's items are read: while the Project pane is open, or the project row shows their open count. */
+async function isBoardWanted($: EngineInterface): Promise<boolean> {
+  return (await read($, isBoardOpen)) || (await isProjectRowShown($))
+}
+
+/** Starts the board's reads when they are wanted and none is set; stops them when they are not. */
+function syncBoardReads($: EngineInterface): void {
+  void (async () => {
+    if (!(await isBoardWanted($))) {
+      stopBoardTimer()
+      return
+    }
+    if (boardTimer === null && boardReading === null) await loadBoardItems($, false)
+  })()
 }
 
 function stopBoardTimer(): void {
@@ -1701,12 +1726,12 @@ function stopBoardTimer(): void {
 }
 
 /**
- * Shows the board's items while the pane is open: the store's when a read of this board is under BOARD_REFRESH_MS
- * old (unless `isForced`), else one GraphQL query through `gh`. Either way the next read is set for when this one
- * turns BOARD_REFRESH_MS old, so the board is read at most that often.
+ * Reads the board's items while they are wanted: the store's when a read of this board is under BOARD_REFRESH_MS old
+ * (unless `isForced`), else one GraphQL query through `gh`. Either way the next read is set for when this one turns
+ * BOARD_REFRESH_MS old, so the board is read at most that often.
  */
 async function loadBoardItems($: EngineInterface, isForced: boolean): Promise<void> {
-  if (!(await read($, isBoardOpen)) || boardReading !== null) {
+  if (!(await isBoardWanted($)) || boardReading !== null) {
     return
   }
   const url = await read($, boardUrl)
@@ -1759,7 +1784,7 @@ async function readBoardItems($: EngineInterface, url: string, target: { login: 
     )
   }
   await update($, isBoardReading, () => false)
-  if (await read($, isBoardOpen)) {
+  if (await isBoardWanted($)) {
     armBoardTimer($, BOARD_REFRESH_MS)
   }
 }
@@ -1768,7 +1793,7 @@ async function readBoardItems($: EngineInterface, url: string, target: { login: 
 async function setBoardOpen($: EngineInterface, isOpen: boolean): Promise<void> {
   await update($, isBoardOpen, () => isOpen)
   if (!isOpen) {
-    stopBoardTimer()
+    syncBoardReads($)
     await $.ui.close({ id: PROJECT_PANE })
     return
   }
@@ -2099,6 +2124,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       runs: await read($, toolRuns),
       listeners: await read($, toolListeners),
       tasks: await read($, runningTasks),
+      openItems: await openBoardItems($),
       gap,
     },
     {
@@ -2108,8 +2134,21 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       toggleLog: id => void toggleLog($, id),
       runCommand: id => void runTool($, id),
       openTasks: () => void setDockOpen($, true),
+      openBoard: () => void setBoardOpen($, true),
     },
   )
+}
+
+/** How many of the board's items are open, beyond the ones read too; null before a read. */
+async function openBoardItems($: EngineInterface): Promise<number | null> {
+  const url = await read($, boardUrl)
+  const shown = await read($, board)
+
+  if (url === null || shown.status !== 'ready' || shown.source !== url) {
+    return null
+  }
+
+  return shown.data.open ?? filterCounts(shown.data.items).open
 }
 
 /** Opens a row link: a link tool's URL may name the repository's values in braces. */
@@ -2337,6 +2376,7 @@ export const register: Register = on => {
     await update($, isHidden, () => hidden)
     await savePersonal($, { isHidden: hidden })
     syncListenerPoll($)
+    syncBoardReads($)
     if (!hidden) {
       await catchUp($)
     }
@@ -2624,7 +2664,7 @@ export const register: Register = on => {
     }
     if (e.id === PROJECT_PANE && e.origin.kind === 'person') {
       await update($, isBoardOpen, () => false)
-      stopBoardTimer()
+      syncBoardReads($)
     }
     if (e.id === DOCK_PANE && e.origin.kind === 'person') {
       await update($, isDockOpen, () => false)
