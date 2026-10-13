@@ -281,9 +281,11 @@ pressing one picks it. They are the same compact buttons as the bar's.
 Tasks run as Claude Code normally runs them: the pane only watches, adding no note to your prompts, changing no
 model and putting nothing in the status line. Tracking costs no tokens: the lines are kept in memory for the session.
 
-- A task's end is what Claude Code's own notice of it says (completed, failed, killed). A subagent whose end was
-  missed is settled when Claude next replies; a monitor whose closing notice never comes ends a minute past its
-  deadline.
+- A task's end is what Claude Code's own notice of it says (completed, failed, killed), whether the notice arrives
+  as a prompt of its own or inside a running turn, the main chat's or the subagent's that started it. A command a
+  synchronous subagent ran in the background stops when that subagent answers, with no notice, so its line ends as
+  stopped then. A subagent whose end was missed is settled when Claude next replies; a monitor whose closing notice
+  never comes ends a minute past its deadline.
 - Only while the pane is open, every subagent Claude starts with its Agent tool has its prompt ask it to report how
   far along it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`); once it does, its line
   shows its percent (its own estimate) and a bar. Workflow agents, commands, monitors, and subagents started while the

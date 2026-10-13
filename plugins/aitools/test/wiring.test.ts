@@ -940,6 +940,33 @@ describe('wiring', () => {
       expect(text).toContain('× Command  Run the tests')
     })
 
+    test("a notice delivered into a running turn, a subagent's included, ends its command too", async ($, on) => {
+      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bverhg9ya' } }))
+      on('prompt.attachment', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 })
+      await $.tool.call({ tool: 'Bash', command: 'gh pr checks 12 --watch', description: 'Wait for PR checks to finish', agentId: 'agent-1' } as never)
+      await run($, 'tasks')
+      expect(await dockText($)).toContain('● Command  Wait for PR checks to finish')
+      const notice =
+        '<task-notification>\n<task-id>bverhg9ya</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n' +
+        '<summary>Background command "Wait for PR checks to finish" completed (exit code 0)</summary>\n</task-notification>'
+      await $.prompt.attachment({ type: 'queued_command', text: notice, origin: { kind: 'engine' }, agentId: 'agent-1' })
+      const text = await dockText($)
+      expect(text).toContain('1 done')
+      expect(text).toContain('✓ Command  Wait for PR checks to finish')
+    })
+
+    test("a synchronous subagent's background command stops when the subagent answers", async ($, on) => {
+      on('tool.call', { tool: 'Bash' }, () => ({
+        result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1', backgroundEndsWithFinalResponse: true },
+      }))
+      await start($, on, { usd: 0 })
+      await $.tool.call({ tool: 'Bash', command: 'npm run dev', description: 'Start the dev server', agentId: 'agent-7' } as never)
+      await $.turn.complete({ ...complete('s1', 'agent-7'), answer: 'Done.' })
+      await run($, 'tasks')
+      expect(await dockText($)).toContain('× Command  Start the dev server')
+    })
+
     test('a monitor ends at its closing notice, or once its deadline has passed; TaskStop stops a task', async ($, on) => {
       let next = 0
       on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: `m${++next}`, timeoutMs: 60_000 } }))

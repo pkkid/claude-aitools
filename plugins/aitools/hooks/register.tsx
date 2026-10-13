@@ -670,13 +670,21 @@ async function endTask($: EngineInterface, id: string, status: EndStatus): Promi
   await updateRun($, run => (run === null ? run : finishCard(run, id, status, now)))
 }
 
+/** Finishes the line of every task a notice in `text` says has ended. */
+async function endNoticedTasks($: EngineInterface, text: string): Promise<void> {
+  for (const notice of parseTaskNotices(text)) {
+    const status = noticeEnd(notice)
+    if (status !== null) await endTask($, notice.id, status)
+  }
+}
+
 /** Gives a task a line, once; a subagent's or workflow agent's line follows its tool calls. */
 async function trackTask(
   $: EngineInterface,
   id: string,
   task: string,
   kind: AgentKind,
-  extra: Pick<AgentCard, 'doing' | 'expiresAt'> = {},
+  extra: Pick<AgentCard, 'doing' | 'expiresAt' | 'endsWith'> = {},
 ): Promise<void> {
   seenAgents.add(id)
   if (kind === 'subagent' || kind === 'workflow') trackedAgents.add(id)
@@ -2380,6 +2388,10 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
+      // Its background commands that end with it end now: no notice will say so.
+      for (const card of (await read($, agentRun))?.cards.filter(c => c.status === 'running' && c.endsWith === id) ?? []) {
+        await endTask($, card.id, 'stopped')
+      }
       // Only a subagent with a line is the pane's business.
       if ((await read($, agentRun))?.cards.some(c => c.id === id) ?? false) {
         await traceDock($, `finished ${id} (${e.reason})`)
@@ -2508,10 +2520,7 @@ export const register: Register = on => {
   // task ended finishes its line. A view on adds its note.
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'task-notification') {
-      for (const notice of parseTaskNotices(e.text)) {
-        const status = noticeEnd(notice)
-        if (status !== null) await endTask($, notice.id, status)
-      }
+      await endNoticedTasks($, e.text)
     }
     if (PERSON_ORIGINS.has(e.origin.kind)) {
       // The session's first prompt names the issue the project row links to, if any.
@@ -2532,13 +2541,23 @@ export const register: Register = on => {
   // A command run in the background, or sent there with Ctrl+B, gets a line until its notice says it ended.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    const taskId = 'result' in result ? (result.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId : undefined
-    if (typeof taskId === 'string') {
+    const ran = 'result' in result ? (result.result as { backgroundTaskId?: unknown; backgroundEndsWithFinalResponse?: unknown } | undefined) : undefined
+    if (typeof ran?.backgroundTaskId === 'string') {
       const line = commandLine(e)
-      await trackTask($, taskId, line.task, 'command', { doing: line.doing })
+      // A synchronous subagent's background command is stopped when it answers, with no notice of its own.
+      const endsWith = ran.backgroundEndsWithFinalResponse === true ? e.agentId : undefined
+      await trackTask($, ran.backgroundTaskId, line.task, 'command', { doing: line.doing, endsWith })
     }
 
     return result
+  })
+
+  // A task's notice delivered into a running turn, the main chat's or a subagent's, comes as an attachment rather
+  // than a prompt (a subagent's own background command reports to it): a notice that a task ended finishes its line.
+  on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
+    await endNoticedTasks($, e.text)
+
+    return next(e)
   })
 
   // A monitor gets a line until its notice says it ended, or its deadline passes.

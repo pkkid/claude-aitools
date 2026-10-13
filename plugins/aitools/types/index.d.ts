@@ -77,6 +77,8 @@ export type AgentCard = {
   endedAt?: number
   /** A monitor's deadline, when it has one: it ends then if no notice says so sooner. */
   expiresAt?: number
+  /** The subagent a command ends with: one a synchronous subagent ran in the background stops when it answers. */
+  endsWith?: string
 }
 
 /** The background tasks seen this session. */

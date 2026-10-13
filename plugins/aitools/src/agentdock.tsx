@@ -105,7 +105,7 @@ export function addCard(
   task: string,
   now: number,
   kind: AgentKind = 'subagent',
-  extra: Pick<AgentCard, 'doing' | 'expiresAt'> = {},
+  extra: Pick<AgentCard, 'doing' | 'expiresAt' | 'endsWith'> = {},
 ): AgentRun {
   if (run.cards.some(c => c.id === id)) {
     return run
