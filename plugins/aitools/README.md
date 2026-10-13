@@ -87,7 +87,7 @@ from. Hiding the bar with `/aitools off` stops all of it.
 ### The settings file
 
 Everything the mod's controls change is saved to `~/.claude/aitools.json` (`$CLAUDE_CONFIG_DIR/aitools.json` when
-that is set): the display options (the project row among them), `/aitools on|off`, the view, and the Background tasks pane's
+that is set): the display options (the project row among them), `/aitools on|off`, the view, and the Background tasks and Branches panes'
 picks. The first run writes every setting into it, taking over what earlier versions kept in the mod's own store, so
 the file lists everything there is to change. Edit it by hand and the bar follows within 30 seconds, when **⁝** opens,
 or at once when Claude edits it. A file that isn't valid JSON is left alone: the settings stay as they were, and one
@@ -100,7 +100,8 @@ dim line in the chat says what's wrong.
     "show": { "mascot": true, "label": true, "projectRow": true, "fiveHour": true, "cacheWarmth": true, "coldCost": true, "...": true }
   },
   "view": "off",
-  "subagents": { "showing": "all", "hideAfter": "never" }
+  "subagents": { "showing": "all", "hideAfter": "never" },
+  "branches": { "where": "both", "show": "all" }
 }
 ```
 
@@ -134,7 +135,7 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Tasks**, **Worktrees**, **Project** (in a
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Tasks**, **Branches**, **Project** (in a
 GitHub repository), **Task View** and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
@@ -297,68 +298,81 @@ model and putting nothing in the status line. Tracking costs no tokens: the line
   workflow has been started this session; after one, such a fork may briefly show as one of its agents.
 - The pane itself starts closed in a new session.
 
-## Worktrees
+## Branches
 
-**Worktrees** in the **🛠** menu opens the Worktrees pane; the pane's own close mark closes it. `/worktrees` opens it,
+**Branches** in the **🛠** menu opens the Branches pane; the pane's own close mark closes it. `/branches` opens it,
 or closes it if open. It stays open until you close it, and comes back after the mod reloads.
 
-On the desktop, Clawd stands left of the pane's header, snipping a stray branch off a tree. He sweeps with a broom
-while worktrees are being removed, and naps under the tree, he and it in grey, when the project has no worktrees
-besides the main checkout. The terminal has no picture.
+On the desktop, Clawd stands left of the pane's controls, snipping a stray branch off a tree. He sweeps with a broom
+while branches are being removed, and naps under the tree, he and it in grey, when there is nothing to clean up. The
+terminal has no picture.
 
 ```
-4 worktrees · 2 to prune · 1 with changes · 1 unpushed
-Prune removes 2 merged worktrees with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.
+Branches: [Local + remote]  Local  Remote
+Show: [All]  Active  Done
 
-Prune worktrees  Refresh
+6 branches · 2 worktrees · 3 done
+Clean up removes 3 done branches: 1 worktree, 1 local and 2 remote branches.
 
-● main · 2 changed files · main checkout · this session        5h    +34  −11  –
-● feat/worktrees-pane · 3 changed files · PR #1               12m   +612  −48  ●  ×
-○ challenge-view-display-fields · merged · PR #168             6h     +0   −0  ✓  ×
-↑ feat/totem-sizes · 2 unpushed commits                        2d    +96 −210  ×  ×
+Clean up 3 done  Refresh
+
+  Branch                                       On      Checked out   Last  Changes     PR   CI
+○ main · base                                  both    main folder     5m        –      –   ✓
+● feat/background-tasks · 3 changed            both    worktree       12m  +612  −48   #12   ●  ×
+↑ feat/totem-sizes · 2 unpushed                local   worktree        2d   +96 −210     –   –  ×
+✓ claude/repo-rename-watcher-setup-f7486b · …  local   worktree       11h        –      –   –  ×
+✓ feat/project-pane                            remote  –              29h        –     #6   ✓  ×
+✓ feat/project-row                             remote  –               2d        –     #5   ✓  ×
 ```
 
-The header counts the worktrees besides the main checkout, then the ones Prune would remove, the ones with changes and
-the ones with unpushed commits. Under it, a line says what **Prune worktrees** would do, or what the last removal did.
+One row is one branch, wherever it lives. A worktree is where a branch is checked out, so it shows on its branch's row
+rather than as a row of its own. The desktop app checks its worktrees out detached, beside a branch named for the
+folder (`claude/<folder>`); such a worktree joins that branch's row, and one no branch matches is a row of its own,
+named by its folder.
 
-Each row is one worktree: the main checkout always first, then the one this session runs in, then the rest by last
-commit.
+- **Branches** filters by where a branch lives: **Local + remote** (the default), **Local** (a branch or worktree on
+  your computer), **Remote** (a branch on the remote, `origin`).
+- **Show** filters by how it stands: **All** (the default), **Active** (the base branch and anything with work to
+  keep), **Done** (what Clean up would remove). Both picks are saved.
+- The header counts the branches the Branches filter leaves, the worktrees among them, and the done ones. Under it, a
+  line says what **Clean up** would do, or what the last removal did.
 
-- **The mark**: a blue ● the worktree this session is in, a yellow ● uncommitted changes, a yellow ↑ commits not
-  pushed, ○ anything else.
-- **The name**: its branch, or its folder for a detached worktree (the desktop app makes those). After it, in dim
-  grey, what it holds that Prune would keep (changed files, unpushed or unmerged commits), or `merged`, then its pull
-  request and what it is (`main checkout`, `this session`, `detached`, `locked`, `folder missing`). The name and
-  these words take the room the pane's width leaves, cut with `…` at the edge, the most telling words first; a merged
-  worktree's name is dim too.
-- **On the right**, in columns that line up on every row: how long since its last commit (`12m`, `5h`, `2d`), lines
-  added and removed since it left the base branch (uncommitted work included), CI, and ×.
-- **CI**: ✓ passed, × failed, ● still running, – none found. It is its pull request's checks at its commit, else the
-  GitHub Actions runs at its commit.
-- **×** asks on a line under the row, `Delete feat/x and its branch?` with **Yes** and **No**, and says what would be
-  lost (`This loses 3 uncommitted files and 2 unpushed commits.`). A merged worktree's remote branch is deleted too; an
-  unmerged one's is kept, since it may hold the only copy of its commits. Pressing × again takes the question back.
-  The main checkout, the worktree this session is in and locked worktrees have no ×.
+Each row:
 
-**Prune worktrees** asks `Remove 2 worktrees and their branches?` with **Yes** and **No**, then removes each worktree
-that has nothing uncommitted (untracked files included) and nothing unmerged, with its local branch and its remote
-branch. It is faint and does nothing when no worktree qualifies.
+- **The mark**: a blue ● the branch this session is on, a yellow ● uncommitted changes in its worktree, a yellow ↑
+  commits not pushed, a green ✓ done, ○ anything else.
+- **The name**, then in dim grey what keeps it (`3 changed`, `2 unpushed`, `2 unmerged`), or `empty`, `base`, and
+  what its worktree is (`detached`, `locked`, `folder missing`, `this session`), or `PR closed`. The name and these
+  words take the room the pane's width leaves, cut with `…` at the edge; a done branch's name is dim too.
+- **On the right**, in columns that line up on every row under their titles: **On** (`both`, `local` or `remote`),
+  **Checked out** (`main folder`, `worktree` or `–`), how long since its last commit, lines added and removed since it
+  left the base branch (its worktree's uncommitted work included), its pull request, CI, and ×.
+- **CI**: ✓ passed, × failed, ● still running, – none found: its pull request's checks at its commit, else the GitHub
+  Actions runs at its commit.
+- **×** asks on a line under the row what it takes, `Delete feat/x (worktree, local branch and remote branch)?`, with
+  **Yes** and **No**, and what would be lost (`This loses 3 uncommitted files and 2 commits not on the base branch.`).
+  Yes removes all of it. Pressing × again takes the question back. The base branch, the main folder's branch, this
+  session's and a locked worktree's have no ×.
 
-- A worktree counts as merged when the base branch has all its commits, or its pull request merged at its current
-  commit (a squash merge). A detached worktree's pull request is found by its commit.
-- The base branch is origin's default branch (`origin/main`), else `origin/main` or `origin/master`, else a local
-  `main` or `master`.
-- The main checkout, the worktree this session is in and locked worktrees are never removed. The rows are read again
-  just before removing, and git itself refuses a worktree with changes, since Prune never forces.
-- Git never prompts: a push that needs a password fails, and the pane says so.
-- A worktree with no commits and no changes of its own counts as merged, so Prune removes it, even one another session
-  has just made and not touched yet.
+How a branch stands:
+
+- **Done**: nothing uncommitted in its worktree, and every commit on it (local or remote) is on the base branch, or
+  its pull request was merged at its current commit (a squash merge).
+- **Empty**: its tip is one of the base branch's own commits, so it was branched off and never given commits of its
+  own (a pull request merged at its commit makes it done instead). It shows `empty`, and Clean up removes it too.
+- **Active**: anything else. **Base**: the base branch, origin's default branch (`origin/main`), else `origin/main` or
+  `origin/master`, else a local `main` or `master`.
+
+**Clean up N done** asks `Remove 1 worktree, 1 local and 2 remote branches?` with **Yes** and **No**, then removes
+each done branch's worktree, local branch and remote branch, in that order, stopping at the first that fails. It never
+forces: git itself refuses a worktree with changes. The rows are read again just before removing. Git never prompts:
+a push that needs a password fails, and the pane says so.
 
 The pane only reads git while it is open: when it opens, every 10 seconds, and a moment after a tool that can change
-files (Bash, Edit, Write, a subagent). GitHub (pull requests and CI, through the `gh` command) is read when it opens
-and every 5 minutes, two API calls each time, since its API limit is shared with everything else signed in as you.
-**Refresh**, right of **Prune worktrees**, reads git and GitHub now. Without `gh`, or signed out, CI shows – and the
-rest works. Closed, it reads nothing.
+files (Bash, Edit, Write, a subagent). When it opens and every 5 minutes it also fetches from the remote (`git fetch
+--prune`, so branches deleted on GitHub go) and reads GitHub (pull requests and CI, through the `gh` command, two API
+calls). **Refresh**, right of **Clean up**, does all of that now. Without `gh`, or signed out, CI and pull requests show
+– and the rest works. Closed, it reads nothing.
 
 ## Project row
 

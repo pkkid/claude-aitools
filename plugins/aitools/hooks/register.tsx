@@ -82,33 +82,34 @@ import {
 } from '../src/mascot'
 import {
   AFTER_TOOL_MS,
-  BRANCH_FORMAT,
+  BRANCHES_PANE,
+  BRANCHES_TITLE,
   CHANGING_TOOLS,
+  FIRST_PARENT_DEPTH,
   GITHUB_EVERY,
   REFRESH_MS,
   SWEEP_MS,
-  WORKTREES_PANE,
   countChanged,
   firstLine,
   isCleanable,
   isDeletable,
-  parseBranchRefs,
+  joinBranches,
   parsePrs,
+  parseRefs,
   parseRuns,
   parseShortstat,
   parseWorktreeList,
+  refFormat,
   removedText,
-  renderWorktrees,
-  toWorktree,
-  worktreeName,
-} from '../src/worktrees'
-import type { PrFacts, Removal, WorktreeFacts } from '../src/worktrees'
+  renderBranches,
+} from '../src/branches'
+import type { CheckoutFacts, PrFacts, Removal, WorktreeEntry } from '../src/branches'
 import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
 import { SETTINGS_PANE, SETTINGS_TITLE, boardProblem, homeRelative, renderSettings, withProject } from '../src/settingspane'
 import type { ProjectChange } from '../src/settingspane'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { BoardData, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun, Worktree, WorktreeTarget } from '../types'
+import type { BoardData, Branch, BranchTarget, BranchesShow, BranchesWhere, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun } from '../types'
 import type { AgentCard, AgentKind, AgentRun, AgentShowing, Brief, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
@@ -152,9 +153,11 @@ const toolLogs = atom({ plugin: 'aitools', key: 'toolLogs' } as const, {})
 const keepWarmStopped = atom({ plugin: 'aitools', key: 'keepWarmStopped' } as const, null)
 const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
 const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
-const isWorktreesOpen = atom({ plugin: 'aitools', key: 'isWorktreesOpen' } as const, false)
-const worktrees = atom({ plugin: 'aitools', key: 'worktrees' } as const, null)
-const worktreeAction = atom({ plugin: 'aitools', key: 'worktreeAction' } as const, null)
+const isBranchesOpen = atom({ plugin: 'aitools', key: 'isBranchesOpen' } as const, false)
+const branchList = atom({ plugin: 'aitools', key: 'branches' } as const, null)
+const branchAction = atom({ plugin: 'aitools', key: 'branchAction' } as const, null)
+const branchesWhere = atom({ plugin: 'aitools', key: 'branchesWhere' } as const, 'both' as BranchesWhere)
+const branchesShow = atom({ plugin: 'aitools', key: 'branchesShow' } as const, 'all' as BranchesShow)
 const isBoardOpen = atom({ plugin: 'aitools', key: 'isBoardOpen' } as const, false)
 const board = atom({ plugin: 'aitools', key: 'board' } as const, { status: 'loading' })
 const boardFilter = atom({ plugin: 'aitools', key: 'boardFilter' } as const, 'open')
@@ -206,16 +209,18 @@ let notesSaving: Promise<void> = Promise.resolve()
 let latestNotes = ''
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
-/** The Worktrees pane's timers: its regular read, and the one a changing tool sets. Running only while it is open. */
-let worktreeTimer: Timer | null = null
-let worktreeSoon: Timer | null = null
-/** Reads of the pane so far since it opened: every GITHUB_EVERY-th asks GitHub too. */
-let worktreeReads = 0
+/** The Branches pane's timers: its regular read, and the one a changing tool sets. Running only while it is open. */
+let branchTimer: Timer | null = null
+let branchSoon: Timer | null = null
+/** Reads of the pane so far since it opened: every GITHUB_EVERY-th asks GitHub too, and fetches. */
+let branchReads = 0
 /** The read in flight, and whether another (with GitHub's or not) waits for it to finish. */
-let worktreeReading: Promise<void> | null = null
-let worktreeQueued: { withGithub: boolean } | null = null
+let branchReading: Promise<void> | null = null
+let branchQueued: { withGithub: boolean } | null = null
 /** The branch merges are measured against, found once each time the pane opens. */
-let worktreeBase: string | null = null
+let branchBase: string | null = null
+/** Lines added and removed since the base, by `<base commit>:<branch commit>`: a branch's are read once per commit. */
+let branchStats = new Map<string, { added: number; removed: number }>()
 /** GitHub's word, as last read: pull requests by branch and CI by commit. Dropped when the pane closes. */
 let githubPrs = new Map<string, PrFacts[]>()
 let githubRuns = new Map<string, CiState>()
@@ -1080,7 +1085,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     toggleSettings: () => void toggleSettingsPane($),
     setView: mode => void setView($, mode),
     openDock: () => void openDock($),
-    openWorktrees: () => void openWorktrees($),
+    openBranches: () => void openBranches($),
     openProject: () => void openProject($),
   }, list, projectRow)
 }
@@ -1158,13 +1163,17 @@ async function readGithub($: EngineInterface, root: string): Promise<void> {
   if (runs?.exitCode === 0) githubRuns = parseRuns(runs.stdout)
 }
 
-/** What git says of one worktree: its changes, its commits the base lacks, its last commit, its lines added and removed. */
-async function readWorktree($: EngineInterface, f: Omit<WorktreeFacts, 'changedFiles' | 'ahead' | 'added' | 'removed' | 'committedAt'>, root: string, base: string): Promise<WorktreeFacts> {
-  const { entry } = f
+/** The remote whose branches the pane lists: the base's (`origin/main` is origin's), else origin. */
+function remoteOf(base: string): string {
+  return /^([^/]+)\//.exec(base)?.[1] ?? 'origin'
+}
+
+/** What git says of one worktree's folder: its changes, its commits the base lacks, its last commit, its lines. */
+async function readCheckout($: EngineInterface, entry: WorktreeEntry, root: string, base: string): Promise<CheckoutFacts> {
   if (entry.isMissing) {
-    // No folder to look in: its branch's commits are counted from the main checkout.
-    const ahead = entry.branch === null ? null : await git($, ['rev-list', '--count', `${base}..${entry.branch}`], root)
-    return { ...f, changedFiles: 0, ahead: Number(ahead?.stdout.trim() || 0), added: 0, removed: 0 }
+    // No folder to look in: its commits are counted from the main checkout.
+    const ahead = await git($, ['rev-list', '--count', `${base}..${entry.head}`], root)
+    return { changedFiles: 0, aheadOfBase: Number(ahead.stdout.trim() || 0), committedAt: null, added: 0, removed: 0 }
   }
   const [status, ahead, mergeBase, last] = await Promise.all([
     git($, ['status', '--porcelain'], entry.path),
@@ -1175,196 +1184,254 @@ async function readWorktree($: EngineInterface, f: Omit<WorktreeFacts, 'changedF
   const stat = mergeBase.exitCode === 0 ? await git($, ['diff', '--shortstat', mergeBase.stdout.trim()], entry.path) : null
 
   return {
-    ...f,
     changedFiles: countChanged(status.stdout),
-    ahead: Number(ahead.stdout.trim() || 0),
+    aheadOfBase: Number(ahead.stdout.trim() || 0),
     committedAt: last.exitCode === 0 && last.stdout.trim() ? Number(last.stdout.trim()) * 1000 : null,
     ...parseShortstat(stat?.stdout ?? ''),
   }
 }
 
-/** Reads every worktree of the session's repository into the pane, GitHub's word too when asked. */
-async function readWorktrees($: EngineInterface, withGithub: boolean): Promise<void> {
+/** Lines added and removed since the base for each branch commit, read once per commit and kept while the pane is open. */
+async function readStats($: EngineInterface, root: string, base: string, baseSha: string, tips: readonly string[]): Promise<Map<string, { added: number; removed: number }>> {
+  const unread = [...new Set(tips)].filter(sha => sha && !branchStats.has(`${baseSha}:${sha}`))
+  await Promise.all(
+    unread.map(async sha => {
+      const diff = await git($, ['diff', '--shortstat', `${base}...${sha}`], root)
+      if (diff.exitCode === 0) branchStats.set(`${baseSha}:${sha}`, parseShortstat(diff.stdout))
+    }),
+  )
+
+  return new Map(tips.flatMap(sha => {
+    const stat = branchStats.get(`${baseSha}:${sha}`)
+    return stat === undefined ? [] : [[sha, stat] as const]
+  }))
+}
+
+/**
+ * Reads every branch of the session's repository into the pane, local and remote, with the worktrees they are checked
+ * out in; with `withGithub`, fetches from the remote (pruning branches it no longer has) and reads GitHub first.
+ */
+async function readBranches($: EngineInterface, withGithub: boolean): Promise<void> {
   const cwd = await $.session.cwd()
   const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
   if (top.exitCode !== 0) {
-    await update($, worktrees, () => ({ status: 'error' as const, text: "This folder isn't in a git repository." }))
+    await update($, branchList, () => ({ status: 'error' as const, text: "This folder isn't in a git repository." }))
     return
   }
   const entries = parseWorktreeList((await git($, ['worktree', 'list', '--porcelain'], cwd)).stdout)
   const main = entries[0]
   if (main === undefined) {
-    await update($, worktrees, () => ({ status: 'error' as const, text: "Git didn't list any worktrees." }))
+    await update($, branchList, () => ({ status: 'error' as const, text: "Git didn't list any worktrees." }))
     return
   }
   const root = main.path
-  worktreeBase ??= await findBase($, root, main.branch)
-  const base = worktreeBase
-  const current = top.stdout.trim()
-  const [refsRun] = await Promise.all([
-    git($, ['for-each-ref', `--format=${BRANCH_FORMAT}`, 'refs/heads'], root),
-    withGithub ? readGithub($, root) : Promise.resolve(),
+  branchBase ??= await findBase($, root, main.branch)
+  const base = branchBase
+  const remote = remoteOf(base)
+  if (withGithub) {
+    await Promise.all([git($, ['fetch', '--prune', '--quiet', remote], root, 60_000), readGithub($, root)])
+  }
+  const [refsRun, lineRun] = await Promise.all([
+    git($, ['for-each-ref', `--format=${refFormat(base)}`, 'refs/heads', `refs/remotes/${remote}`], root),
+    git($, ['rev-list', '--first-parent', `--max-count=${FIRST_PARENT_DEPTH}`, base], root),
   ])
-  const refs = parseBranchRefs(refsRun.stdout)
-  const facts = await Promise.all(
-    entries.map((entry, i) =>
-      readWorktree($, { entry, isMain: i === 0, isCurrent: entry.path === current, ref: entry.branch === null ? undefined : refs.get(entry.branch) }, root, base),
-    ),
-  )
+  const { locals, remotes } = parseRefs(refsRun.stdout)
+  const baseLine = lineRun.stdout.split('\n').filter(Boolean)
+  const [checkouts, stats] = await Promise.all([
+    Promise.all(entries.map(async entry => [entry.path, await readCheckout($, entry, root, base)] as const)).then(pairs => new Map(pairs)),
+    readStats($, root, base, baseLine[0] ?? '', [...[...locals.values()].map(l => l.sha), ...[...remotes.values()].map(r => r.sha)]),
+  ])
   // Closed while reading: nothing is shown, so nothing is kept.
-  if (!(await read($, isWorktreesOpen))) {
+  if (!(await read($, isBranchesOpen))) {
     return
   }
-  await update($, worktrees, () => ({ status: 'ready' as const, base, worktrees: facts.map(f => toWorktree(f, githubPrs, githubRuns)) }))
+  const branches = joinBranches({
+    base,
+    remote,
+    entries,
+    current: top.stdout.trim(),
+    locals,
+    remotes,
+    checkouts,
+    stats,
+    baseLine: new Set(baseLine),
+    prs: githubPrs,
+    runs: githubRuns,
+  })
+  await update($, branchList, () => ({ status: 'ready' as const, base, branches }))
 }
 
 /**
  * Reads the pane again while it is open, one read at a time: a read asked for while one runs waits for it, and
  * several asked for meanwhile come to one.
  */
-async function refreshWorktrees($: EngineInterface, withGithub = false): Promise<void> {
-  if (!(await read($, isWorktreesOpen))) {
+async function refreshBranches($: EngineInterface, withGithub = false): Promise<void> {
+  if (!(await read($, isBranchesOpen))) {
     return
   }
-  if (worktreeReading !== null) {
-    worktreeQueued = { withGithub: withGithub || (worktreeQueued?.withGithub ?? false) }
+  if (branchReading !== null) {
+    branchQueued = { withGithub: withGithub || (branchQueued?.withGithub ?? false) }
     return
   }
-  worktreeReading = readWorktrees($, withGithub).catch(async error => {
-    await update($, worktrees, () => ({ status: 'error' as const, text: `Couldn't read the worktrees: ${String(error)}` }))
+  branchReading = readBranches($, withGithub).catch(async error => {
+    await update($, branchList, () => ({ status: 'error' as const, text: `Couldn't read the branches: ${String(error)}` }))
   })
-  await worktreeReading
-  worktreeReading = null
-  const queued = worktreeQueued
-  worktreeQueued = null
+  await branchReading
+  branchReading = null
+  const queued = branchQueued
+  branchQueued = null
   if (queued !== null) {
-    await refreshWorktrees($, queued.withGithub)
+    await refreshBranches($, queued.withGithub)
   }
 }
 
-/** The pane's regular read, GitHub's every GITHUB_EVERY-th time; none while it removes worktrees. */
-async function onWorktreeTick($: EngineInterface): Promise<void> {
-  worktreeReads += 1
-  if ((await read($, worktreeAction))?.step !== 'busy') {
-    await refreshWorktrees($, worktreeReads % GITHUB_EVERY === 0)
+/** The pane's regular read, GitHub's and a fetch every GITHUB_EVERY-th time; none while it removes branches. */
+async function onBranchTick($: EngineInterface): Promise<void> {
+  branchReads += 1
+  if ((await read($, branchAction))?.step !== 'busy') {
+    await refreshBranches($, branchReads % GITHUB_EVERY === 0)
   }
 }
 
-/** Runs the pane's reads only while it is open; closed, its timers stop and GitHub's word is dropped. */
-function syncWorktrees($: EngineInterface, isOpen: boolean): void {
+/** Runs the pane's reads only while it is open; closed, its timers stop and what it read is dropped. */
+function syncBranches($: EngineInterface, isOpen: boolean): void {
   if (isOpen) {
-    worktreeTimer ??= $.clock.every(REFRESH_MS, () => void onWorktreeTick($))
+    branchTimer ??= $.clock.every(REFRESH_MS, () => void onBranchTick($))
     return
   }
-  worktreeTimer?.cancel()
-  worktreeSoon?.cancel()
-  worktreeTimer = null
-  worktreeSoon = null
-  worktreeReads = 0
-  worktreeBase = null
+  branchTimer?.cancel()
+  branchSoon?.cancel()
+  branchTimer = null
+  branchSoon = null
+  branchReads = 0
+  branchBase = null
+  branchStats = new Map()
   githubPrs = new Map()
   githubRuns = new Map()
 }
 
-/** The pane's Refresh: git and GitHub read now, and the next scheduled GitHub read a full interval later. */
-async function refreshWorktreesNow($: EngineInterface): Promise<void> {
-  if ((await read($, worktreeAction))?.step === 'busy') {
+/** The pane's Refresh: a fetch, git and GitHub read now, and the next scheduled GitHub read a full interval later. */
+async function refreshBranchesNow($: EngineInterface): Promise<void> {
+  if ((await read($, branchAction))?.step === 'busy') {
     return
   }
-  worktreeReads = 0
-  await refreshWorktrees($, true)
+  branchReads = 0
+  await refreshBranches($, true)
 }
 
-/** Opens or closes the Worktrees pane; opening reads everything at once, GitHub included. */
-async function setWorktreesOpen($: EngineInterface, isOpen: boolean): Promise<void> {
-  await update($, isWorktreesOpen, () => isOpen)
-  syncWorktrees($, isOpen)
+/** Opens or closes the Branches pane; opening fetches and reads everything at once, GitHub included. */
+async function setBranchesOpen($: EngineInterface, isOpen: boolean): Promise<void> {
+  await update($, isBranchesOpen, () => isOpen)
+  syncBranches($, isOpen)
   if (!isOpen) {
-    await $.ui.close({ id: WORKTREES_PANE })
+    await $.ui.close({ id: BRANCHES_PANE })
     return
   }
-  await update($, worktreeAction, () => null)
-  await update($, worktrees, list => (list?.status === 'ready' ? list : { status: 'loading' as const }))
-  await $.ui.open({ id: WORKTREES_PANE, title: 'Worktrees' })
-  void refreshWorktrees($, true)
+  await update($, branchAction, () => null)
+  await update($, branchList, list => (list?.status === 'ready' ? list : { status: 'loading' as const }))
+  await $.ui.open({ id: BRANCHES_PANE, title: BRANCHES_TITLE })
+  void refreshBranches($, true)
 }
 
-/** The 🛠 menu's Worktrees: opens the pane (its own close mark closes it), and closes the menu. */
-async function openWorktrees($: EngineInterface): Promise<void> {
+/** The 🛠 menu's Branches: opens the pane (its own close mark closes it), and closes the menu. */
+async function openBranches($: EngineInterface): Promise<void> {
   await update($, isToolsOpen, () => false)
-  await setWorktreesOpen($, true)
+  await setBranchesOpen($, true)
 }
 
 /** After a tool that can change files, the open pane reads again shortly: a burst of calls reads once. */
-function worktreesSoon($: EngineInterface): void {
-  worktreeSoon?.cancel()
-  worktreeSoon = $.clock.after(AFTER_TOOL_MS, () => {
-    worktreeSoon = null
-    void refreshWorktrees($)
+function branchesSoon($: EngineInterface): void {
+  branchSoon?.cancel()
+  branchSoon = $.clock.after(AFTER_TOOL_MS, () => {
+    branchSoon = null
+    void refreshBranches($)
   })
 }
 
+/** The pane's Branches pick, saved for later sessions. */
+async function setBranchesWhere($: EngineInterface, where: BranchesWhere): Promise<void> {
+  await update($, branchesWhere, () => where)
+  await savePersonal($, { branchesWhere: where })
+}
+
+/** The pane's Show pick, saved for later sessions. */
+async function setBranchesShow($: EngineInterface, show: BranchesShow): Promise<void> {
+  await update($, branchesShow, () => show)
+  await savePersonal($, { branchesShow: show })
+}
+
 /**
- * Removes one worktree, then its branch; its remote branch too when merged (an unmerged one's may hold the only copy
- * of its commits, so it stays). `force` removes a worktree with changes.
+ * Removes everything one row stands for: its worktree, then its local branch, then its remote branch, stopping at the
+ * first that fails. `force` removes a worktree with changes.
  */
-async function removeWorktree($: EngineInterface, w: Worktree, root: string, force: boolean): Promise<Removal> {
-  const result: Removal = { name: worktreeName(w), isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false }
-  const removed = w.isMissing
-    ? await git($, ['worktree', 'prune'], root)
-    : await git($, ['worktree', 'remove', ...(force ? ['--force'] : []), w.path], root, 60_000)
-  if (removed.exitCode !== 0) {
-    return { ...result, error: firstLine(removed.stderr) }
-  }
-  result.isRemoved = true
-  if (w.branch !== null) {
-    // Whether it is merged is the pane's own reckoning (a squash merge included), so git is not asked again.
-    result.isBranchDeleted = (await git($, ['branch', '-D', w.branch], root)).exitCode === 0
-    if (w.remote !== null && w.isMerged) {
-      result.isRemoteDeleted = (await git($, ['push', w.remote.name, '--delete', w.remote.branch], root, 60_000)).exitCode === 0
+async function removeBranch($: EngineInterface, b: Branch, root: string, force: boolean): Promise<Removal> {
+  const result: Removal = { name: b.name, isWorktreeRemoved: false, isBranchDeleted: false, isRemoteDeleted: false }
+  if (b.checkout !== null) {
+    const removed = b.checkout.isMissing
+      ? await git($, ['worktree', 'prune'], root)
+      : await git($, ['worktree', 'remove', ...(force ? ['--force'] : []), b.checkout.path], root, 60_000)
+    if (removed.exitCode !== 0) {
+      return { ...result, error: firstLine(removed.stderr) || 'git refused' }
     }
+    result.isWorktreeRemoved = true
+  }
+  if (b.isLocal) {
+    // Whether it is done is the pane's own reckoning (a squash merge included), so git is not asked again.
+    const deleted = await git($, ['branch', '-D', b.name], root)
+    if (deleted.exitCode !== 0) {
+      return { ...result, error: firstLine(deleted.stderr) || 'git refused' }
+    }
+    result.isBranchDeleted = true
+  }
+  if (b.remote !== null) {
+    const pushed = await git($, ['push', b.remote.name, '--delete', b.remote.branch], root, 60_000)
+    if (pushed.exitCode !== 0) {
+      return { ...result, error: firstLine(pushed.stderr) || 'the push failed' }
+    }
+    result.isRemoteDeleted = true
   }
 
   return result
 }
 
 /**
- * Carries out what the pane asked and the person said yes to: every worktree Clean may remove, or the one row. The
- * rows are read again first, so nothing changed since the last read is removed on stale facts. Clawd sweeps meanwhile,
- * for SWEEP_MS at least.
+ * Carries out what the pane asked and the person said yes to: every done branch, or the one row. The rows are read
+ * again first, so nothing changed since the last read is removed on stale facts. Clawd sweeps meanwhile, for SWEEP_MS
+ * at least.
  */
-async function confirmWorktrees($: EngineInterface): Promise<void> {
-  const action = await read($, worktreeAction)
+async function confirmBranches($: EngineInterface): Promise<void> {
+  const action = await read($, branchAction)
   if (action?.step !== 'ask') {
     return
   }
-  const target: WorktreeTarget = action.target
+  const target: BranchTarget = action.target
   const startedAt = await $.clock.now()
-  await update($, worktreeAction, () => ({ step: 'busy' as const, target }))
-  await worktreeReading
-  await readWorktrees($, false).catch(() => undefined)
-  const list = await read($, worktrees)
-  const rows = list?.status === 'ready' ? list.worktrees : []
-  const root = rows.find(w => w.isMain)?.path ?? (await $.session.cwd())
+  await update($, branchAction, () => ({ step: 'busy' as const, target }))
+  await branchReading
+  await readBranches($, false).catch(() => undefined)
+  const list = await read($, branchList)
+  const rows = list?.status === 'ready' ? list.branches : []
+  const root = rows.find(b => b.checkout?.isMain)?.checkout?.path ?? (await $.session.cwd())
   const results: Removal[] = []
   if (target.kind === 'clean') {
-    for (const w of rows.filter(isCleanable)) {
-      results.push(await removeWorktree($, w, root, false))
+    for (const b of rows.filter(isCleanable)) {
+      results.push(await removeBranch($, b, root, false))
     }
     await git($, ['worktree', 'prune'], root)
   } else {
-    const w = rows.find(row => row.path === target.path)
-    if (w === undefined) {
-      results.push({ name: target.path, isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false, error: 'it is no longer listed' })
-    } else if (!isDeletable(w)) {
-      results.push({ name: worktreeName(w), isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false, error: 'it is in use' })
+    const b = rows.find(row => row.name === target.name)
+    const none = { isWorktreeRemoved: false, isBranchDeleted: false, isRemoteDeleted: false }
+    if (b === undefined) {
+      results.push({ name: target.name, ...none, error: 'it is no longer listed' })
+    } else if (!isDeletable(b)) {
+      results.push({ name: b.name, ...none, error: 'it is in use' })
     } else {
-      results.push(await removeWorktree($, w, root, !isCleanable(w)))
+      results.push(await removeBranch($, b, root, !isCleanable(b)))
     }
   }
   const done = removedText(results)
-  await readWorktrees($, false).catch(() => undefined)
-  const finish = () => void update($, worktreeAction, () => ({ step: 'done' as const, ...done }))
+  await readBranches($, false).catch(() => undefined)
+  const finish = () => void update($, branchAction, () => ({ step: 'done' as const, ...done }))
   const left = SWEEP_MS - ((await $.clock.now()) - startedAt)
   if (left > 0) {
     $.clock.after(left, finish)
@@ -1373,9 +1440,9 @@ async function confirmWorktrees($: EngineInterface): Promise<void> {
   }
 }
 
-/** Sets the pane's question; a press while worktrees are being removed changes nothing. */
-async function askWorktrees($: EngineInterface, target: WorktreeTarget | null): Promise<void> {
-  await update($, worktreeAction, action => (action?.step === 'busy' ? action : target === null ? null : { step: 'ask' as const, target }))
+/** Sets the pane's question; a press while branches are being removed changes nothing. */
+async function askBranches($: EngineInterface, target: BranchTarget | null): Promise<void> {
+  await update($, branchAction, action => (action?.step === 'busy' ? action : target === null ? null : { step: 'ask' as const, target }))
 }
 
 // ---- aitools.json: the person's settings in ~/.claude, the project row's in the repository ----
@@ -1480,6 +1547,8 @@ async function applyPersonal($: EngineInterface, p: Personal, isLoad: boolean): 
   await update($, isHidden, () => p.isHidden)
   await update($, agentShowing, () => p.showing)
   await update($, hideAfter, () => p.hideAfter)
+  await update($, branchesWhere, () => p.branchesWhere)
+  await update($, branchesShow, () => p.branchesShow)
   const wasView = await read($, viewMode)
   await update($, viewMode, () => p.view)
   if (isLoad) {
@@ -2237,10 +2306,10 @@ export const register: Register = on => {
       await $.ui.open({ id: NOTES_PANE, title: 'Notes' })
       await loadNotes($)
     }
-    await $.command.register({ name: 'worktrees', description: 'Open or close the Worktrees pane' })
-    // The Worktrees pane went with the old module too, its timers with it: it opens again and reads afresh.
-    if (await read($, isWorktreesOpen)) {
-      await setWorktreesOpen($, true)
+    await $.command.register({ name: 'branches', description: 'Open or close the Branches pane' })
+    // The Branches pane went with the old module too, its timers with it: it opens again and reads afresh.
+    if (await read($, isBranchesOpen)) {
+      await setBranchesOpen($, true)
     }
     // The Project pane too: it opens again, on the stored read while that is fresh.
     if (await read($, isBoardOpen)) {
@@ -2524,24 +2593,32 @@ export const register: Register = on => {
     return { text: (await toggleDock($)) ? 'Background tasks open.' : 'Background tasks closed.' }
   })
 
-  on('command.run', { command: 'worktrees' }, async $ => {
-    const isOpen = !(await read($, isWorktreesOpen))
-    await setWorktreesOpen($, isOpen)
+  on('command.run', { command: 'branches' }, async $ => {
+    const isOpen = !(await read($, isBranchesOpen))
+    await setBranchesOpen($, isOpen)
 
-    return { text: isOpen ? 'Worktrees open.' : 'Worktrees closed.' }
+    return { text: isOpen ? 'Branches open.' : 'Branches closed.' }
   })
 
-  on('ui.render', { component: 'Pane', requestId: WORKTREES_PANE }, async ($, e) => {
-    const view = { list: await read($, worktrees), action: await read($, worktreeAction), now: await $.clock.now() }
+  on('ui.render', { component: 'Pane', requestId: BRANCHES_PANE }, async ($, e) => {
+    const view = {
+      list: await read($, branchList),
+      action: await read($, branchAction),
+      where: await read($, branchesWhere),
+      show: await read($, branchesShow),
+      now: await $.clock.now(),
+    }
     const el = $.ui.resolve(e)
     // Clawd is SVG: the terminal never gets him, whatever its table holds.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
 
-    return renderWorktrees({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, view, {
-      ask: target => void askWorktrees($, target),
-      confirm: () => void confirmWorktrees($),
-      cancel: () => void askWorktrees($, null),
-      refresh: () => void refreshWorktreesNow($),
+    return renderBranches({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, view, {
+      ask: target => void askBranches($, target),
+      confirm: () => void confirmBranches($),
+      cancel: () => void askBranches($, null),
+      refresh: () => void refreshBranchesNow($),
+      setWhere: where => void setBranchesWhere($, where),
+      setShow: show => void setBranchesShow($, show),
     })
   })
 
@@ -2658,9 +2735,9 @@ export const register: Register = on => {
     if (e.id === NOTES_PANE && e.origin.kind === 'person') {
       await update($, isNotesOpen, () => false)
     }
-    if (e.id === WORKTREES_PANE && e.origin.kind === 'person') {
-      await update($, isWorktreesOpen, () => false)
-      syncWorktrees($, false)
+    if (e.id === BRANCHES_PANE && e.origin.kind === 'person') {
+      await update($, isBranchesOpen, () => false)
+      syncBranches($, false)
     }
     if (e.id === PROJECT_PANE && e.origin.kind === 'person') {
       await update($, isBoardOpen, () => false)
@@ -2724,9 +2801,9 @@ export const register: Register = on => {
         }
       }
     } finally {
-      // While the Worktrees pane is open, a tool that can change files reads it again shortly after.
-      if (CHANGING_TOOLS.has(e.tool) && (await read($, isWorktreesOpen))) {
-        worktreesSoon($)
+      // While the Branches pane is open, a tool that can change files reads it again shortly after.
+      if (CHANGING_TOOLS.has(e.tool) && (await read($, isBranchesOpen))) {
+        branchesSoon($)
       }
       // An edit to either aitools.json takes effect at once; a tool that can change the branch reads the repository
       // soon, for the project row's issue and its tools' {branch}.

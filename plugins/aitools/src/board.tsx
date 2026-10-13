@@ -8,7 +8,7 @@ import type { Elements, RenderChildren } from 'claude-code'
 
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN, RED, YELLOW } from './palette'
 import { TOWER_HEIGHT, TOWER_WIDTH, towerAlt, towerSvg } from './tower'
-import { age } from './worktrees'
+import { age } from './branches'
 import type { BoardData, BoardFilter, BoardItem, BoardState, TowerMode } from '../types'
 
 export const PROJECT_PANE = 'project'

@@ -106,17 +106,21 @@ export type MonthTotal = {
   hours?: Record<string, number>
 }
 
-/** A worktree's CI at its commit: passed, failed, still running, or none found. */
+/** A branch's CI at its commit: passed, failed, still running, or none found. */
 export type CiState = 'pass' | 'fail' | 'running' | 'none'
 
-/** A worktree branch's pull request on GitHub. */
-export type WorktreePr = { number: number; url: string; state: 'open' | 'merged' | 'closed' }
+/** A branch's pull request on GitHub. */
+export type BranchPr = { number: number; url: string; state: 'open' | 'merged' | 'closed' }
 
-/** One row of the Worktrees pane: what git and GitHub say of a worktree. */
-export type Worktree = {
+/** Which branches the Branches pane lists by where they live: on this computer, on origin, or either. */
+export type BranchesWhere = 'both' | 'local' | 'remote'
+
+/** Which branches the Branches pane lists by how they stand: all, those with work to keep, or those done. */
+export type BranchesShow = 'all' | 'active' | 'done'
+
+/** A worktree a branch is checked out in. */
+export type BranchCheckout = {
   path: string
-  /** Null for a detached HEAD. */
-  branch: string | null
   head: string
   /** The repository's main working tree: never removed. */
   isMain: boolean
@@ -125,30 +129,46 @@ export type Worktree = {
   isLocked: boolean
   /** Its folder is gone; git still lists it until pruned. */
   isMissing: boolean
-  /** Lines added and removed since it left the base branch, uncommitted work included. */
-  added: number
-  removed: number
+  /** Checked out at a commit rather than on the branch, as the desktop app makes them. */
+  isDetached: boolean
   /** Changed, staged and untracked files. */
   changedFiles: number
-  /** Commits on it the base branch lacks. */
-  ahead: number
-  /** Commits its remote branch lacks: all of `ahead` with no remote branch. */
-  unpushed: number
-  /** Nothing on it the base branch lacks, or its pull request merged at its commit. */
-  isMerged: boolean
-  /** The remote branch it tracks, while that exists. */
-  remote: { name: string; branch: string } | null
-  /** Its last commit (epoch ms). */
-  committedAt: number | null
-  pr: WorktreePr | null
-  ci: CiState
 }
 
-/** The Worktrees pane's rows, read while it is open; `base` is the branch merges are measured against. */
-export type WorktreeList =
+/**
+ * How a branch stands: the base branch itself; active, with work its parent lacks (commits, or changes in its
+ * worktree); done, all its work already on its parent; or empty, never given commits of its own.
+ */
+export type BranchState = 'base' | 'active' | 'done' | 'empty'
+
+/** One row of the Branches pane: a branch, wherever it lives, and the worktree it is checked out in. */
+export type Branch = {
+  /** The branch's name, or a detached worktree's folder name when no branch matches it. */
+  name: string
+  /** It has a branch on this computer. */
+  isLocal: boolean
+  /** Its branch on the remote, while that exists. */
+  remote: { name: string; branch: string } | null
+  checkout: BranchCheckout | null
+  /** Commits on it the base branch lacks (the most of its local branch, remote branch and worktree). */
+  ahead: number
+  /** Local commits its remote branch lacks: all of `ahead` with no remote branch. */
+  unpushed: number
+  /** Lines added and removed since it left the base branch, its worktree's uncommitted work included. */
+  added: number
+  removed: number
+  /** Its last commit (epoch ms). */
+  committedAt: number | null
+  pr: BranchPr | null
+  ci: CiState
+  state: BranchState
+}
+
+/** The Branches pane's rows, read while it is open; `base` is the branch merges are measured against. */
+export type BranchList =
   | { status: 'loading' }
   | { status: 'error'; text: string }
-  | { status: 'ready'; base: string; worktrees: Worktree[] }
+  | { status: 'ready'; base: string; branches: Branch[] }
 
 /** What a /keepwarm ping read and cost (priced at the chat's model; null for one with no known rates). */
 export type PingReceipt = { at: number; read: number; usd: number | null; isEstimate: boolean }
@@ -195,12 +215,12 @@ export type ToolRun = {
 /** Whatever listens on a server tool's port, whoever started it: its checkout, a label (its branch) and its pid. */
 export type ToolListener = { checkout: string; label: string; pid: number | null }
 
-/** What a press in the Worktrees pane is about: Clean worktrees, or one row's delete. */
-export type WorktreeTarget = { kind: 'clean' } | { kind: 'delete'; path: string }
+/** What a press in the Branches pane is about: Clean up, or one row's delete. */
+export type BranchTarget = { kind: 'clean' } | { kind: 'delete'; name: string }
 
 /** A question the pane is asking, the removal under way, or what the last one did; null when none. */
-export type WorktreeAction =
-  | { step: 'ask' | 'busy'; target: WorktreeTarget }
+export type BranchAction =
+  | { step: 'ask' | 'busy'; target: BranchTarget }
   | { step: 'done'; text: string; isError: boolean }
   | null
 
@@ -321,12 +341,15 @@ declare module 'claude-code' {
       keepWarm: KeepWarm | null
       /** Why /keepwarm last stopped before its time (a failed or cold ping); null when it ended on time or was turned off. */
       keepWarmStopped: string | null
-      /** Whether the Worktrees pane is open, so a reload opens it again; git is only read while it is. */
-      isWorktreesOpen: boolean
+      /** Whether the Branches pane is open, so a reload opens it again; git is only read while it is. */
+      isBranchesOpen: boolean
       /** The pane's rows; null until it first opens. */
-      worktrees: WorktreeList | null
+      branches: BranchList | null
       /** The pane's question, removal under way, or last result. */
-      worktreeAction: WorktreeAction
+      branchAction: BranchAction
+      /** The pane's two filters; mirrored in the settings file. */
+      branchesWhere: BranchesWhere
+      branchesShow: BranchesShow
       /** Whether the Project pane is open, so a reload opens it again; the board is only read while it is. */
       isBoardOpen: boolean
       /** The Project pane's board items. */
