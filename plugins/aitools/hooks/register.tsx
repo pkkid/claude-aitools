@@ -8,10 +8,10 @@ import {
   DEFAULT_HIDE_AFTER,
   DOCK_PANE,
   DOCK_TITLE,
+  KIND_LABELS,
   activityText,
   addCard,
   clip,
-  commandLine,
   finishCard,
   isRunning,
   kindOf,
@@ -89,6 +89,8 @@ import {
   GITHUB_EVERY,
   REFRESH_MS,
   SWEEP_MS,
+  baseName,
+  countBranches,
   countChanged,
   firstLine,
   isCleanable,
@@ -138,6 +140,7 @@ const agentShowing = atom({ plugin: 'aitools', key: 'agentShowing' } as const, '
 const hideAfter = atom({ plugin: 'aitools', key: 'hideAfter' } as const, DEFAULT_HIDE_AFTER)
 const agentRun = atom({ plugin: 'aitools', key: 'agentRun' } as const, null)
 const runningTasks = atom({ plugin: 'aitools', key: 'runningTasks' } as const, 0)
+const branchCount = atom({ plugin: 'aitools', key: 'branchCount' } as const, null)
 const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
 const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
 const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
@@ -222,6 +225,8 @@ let branchReading: Promise<void> | null = null
 let branchQueued: { withGithub: boolean } | null = null
 /** The branch merges are measured against, found once each time the pane opens. */
 let branchBase: string | null = null
+/** The base the project row's branch count leaves out, found once per main checkout. */
+let countBase: { main: string; base: string } | null = null
 /** Lines added and removed since the base, by `<base commit>:<branch commit>`: a branch's are read once per commit. */
 let branchStats = new Map<string, { added: number; removed: number }>()
 /** GitHub's word, as last read: pull requests by branch and CI by commit. Dropped when the pane closes. */
@@ -705,7 +710,7 @@ async function trackTask(
   id: string,
   task: string,
   kind: AgentKind,
-  extra: Pick<AgentCard, 'doing' | 'expiresAt' | 'endsWith'> = {},
+  extra: Pick<AgentCard, 'doing' | 'expiresAt'> = {},
 ): Promise<void> {
   seenAgents.add(id)
   if (kind === 'subagent' || kind === 'workflow') trackedAgents.add(id)
@@ -751,7 +756,7 @@ async function settleCards($: EngineInterface): Promise<void> {
     return
   }
   // A subagent the engine no longer lists has finished too; only one listed as running or pending is still at work. A
-  // workflow's agents are never listed, nor are commands and monitors: their own finish is the only word on them.
+  // workflow's agents are never listed, nor are monitors: their own finish is the only word on them.
   for (const card of run?.cards.filter(c => c.status === 'running' && kindOf(c) === 'subagent') ?? []) {
     const status = agents.find(a => a.id === card.id)?.status ?? 'gone'
     if (status !== 'running' && status !== 'pending') {
@@ -1104,7 +1109,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
   const list =
     !flags.isTaskView || (await read($, isChecklistClosed))
       ? null
-      : renderChecklist(el, await read($, checklist), isWorking, await read($, isChecklistCollapsed), {
+      : renderChecklist(el, await read($, checklist), isWorking, { isCollapsed: await read($, isChecklistCollapsed), markGap: el.Svg ? 0 : 1 }, {
           toggle: () => void update($, isChecklistCollapsed, isCollapsed => !isCollapsed),
           close: () => void update($, isChecklistClosed, () => true),
         })
@@ -1465,6 +1470,7 @@ async function confirmBranches($: EngineInterface): Promise<void> {
   }
   const done = removedText(results)
   await readBranches($, false).catch(() => undefined)
+  await readBranchCount($)
   const finish = () => void update($, branchAction, () => ({ step: 'done' as const, ...done }))
   const left = SWEEP_MS - ((await $.clock.now()) - startedAt)
   if (left > 0) {
@@ -1709,15 +1715,38 @@ async function readRepo($: EngineInterface): Promise<GithubRepo | null> {
 async function refreshRepo($: EngineInterface): Promise<void> {
   const next = await readRepo($)
   const was = await read($, githubRepo)
-  if (JSON.stringify(next) === JSON.stringify(was)) {
+  if (JSON.stringify(next) !== JSON.stringify(was)) {
+    await update($, githubRepo, () => next)
+    if (next?.url !== was?.url || next?.checkout !== was?.checkout) {
+      isProjectLoaded = false
+      await loadProject($)
+    }
+    await refreshIssueTitle($)
+  }
+  await readBranchCount($)
+}
+
+/**
+ * The project row's branch count, while the row shows: the repository's branches, local and remote counted once by
+ * name, the base left out. One `git for-each-ref`, read with the repository (every 30 seconds and after a tool).
+ */
+async function readBranchCount($: EngineInterface): Promise<void> {
+  const repo = await read($, githubRepo)
+  if (repo === null || !(await isProjectRowShown($))) {
     return
   }
-  await update($, githubRepo, () => next)
-  if (next?.url !== was?.url || next?.checkout !== was?.checkout) {
-    isProjectLoaded = false
-    await loadProject($)
+  if (countBase?.main !== repo.main) {
+    countBase = { main: repo.main, base: await findBase($, repo.main, null) }
   }
-  await refreshIssueTitle($)
+  const remote = remoteOf(countBase.base)
+  const refs = await git($, ['for-each-ref', '--format=%(refname)', 'refs/heads', `refs/remotes/${remote}`], repo.main)
+  if (refs.exitCode !== 0) {
+    return
+  }
+  const n = countBranches(refs.stdout, remote, baseName(countBase.base))
+  if ((await read($, branchCount)) !== n) {
+    await update($, branchCount, () => n)
+  }
 }
 
 function refreshRepoSoon($: EngineInterface): void {
@@ -2229,6 +2258,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       listeners: await read($, toolListeners),
       tasks: await read($, runningTasks),
       openItems: await openBoardItems($),
+      branches: await read($, branchCount),
       gap,
     },
     {
@@ -2239,6 +2269,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       runCommand: id => void runTool($, id),
       openTasks: () => void setDockOpen($, true),
       openBoard: () => void setBoardOpen($, true),
+      openBranches: () => void setBranchesOpen($, true),
     },
   )
 }
@@ -2325,6 +2356,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'tasks', description: 'Open or close the Background tasks pane' })
+    // Background commands no longer get lines: a reload drops the ones listed before, which nothing would end.
+    await updateRun($, run => (run === null ? run : { ...run, cards: run.cards.filter(c => kindOf(c) in KIND_LABELS) }))
     // A reload starts the module's bookkeeping over: the running lines are the subagents still at work.
     for (const card of (await read($, agentRun))?.cards ?? []) {
       seenAgents.add(card.id)
@@ -2414,10 +2447,6 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
-      // Its background commands that end with it end now: no notice will say so.
-      for (const card of (await read($, agentRun))?.cards.filter(c => c.status === 'running' && c.endsWith === id) ?? []) {
-        await endTask($, card.id, 'stopped')
-      }
       // Only a subagent with a line is the pane's business.
       if ((await read($, agentRun))?.cards.some(c => c.id === id) ?? false) {
         await traceDock($, `finished ${id} (${e.reason})`)
@@ -2565,22 +2594,8 @@ export const register: Register = on => {
   // Every subagent gets a line, following its tool calls and, while the pane is open, the progress it reports.
   on('agent.spawn', ($, e, next) => (e.fork ? next(e) : startSubagent($, e, next)))
 
-  // A command run in the background, or sent there with Ctrl+B, gets a line until its notice says it ended.
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const result = await next(e)
-    const ran = 'result' in result ? (result.result as { backgroundTaskId?: unknown; backgroundEndsWithFinalResponse?: unknown } | undefined) : undefined
-    if (typeof ran?.backgroundTaskId === 'string') {
-      const line = commandLine(e)
-      // A synchronous subagent's background command is stopped when it answers, with no notice of its own.
-      const endsWith = ran.backgroundEndsWithFinalResponse === true ? e.agentId : undefined
-      await trackTask($, ran.backgroundTaskId, line.task, 'command', { doing: line.doing, endsWith })
-    }
-
-    return result
-  })
-
   // A task's notice delivered into a running turn, the main chat's or a subagent's, comes as an attachment rather
-  // than a prompt (a subagent's own background command reports to it): a notice that a task ended finishes its line.
+  // than a prompt: a notice that a task ended finishes its line.
   on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
     await endNoticedTasks($, e.text)
 

@@ -5,6 +5,7 @@ import {
   checkoutText,
   cleanText,
   combineChecks,
+  countBranches,
   deleteText,
   headerText,
   isCleanable,
@@ -116,6 +117,12 @@ describe('branches: reading git', () => {
     expect(locals.get('gone')?.upstream).toBeNull()
     expect(locals.get('solo')).toMatchObject({ committedAt: null, aheadOfBase: 1, upstream: null })
     expect([...remotes.keys()]).toEqual(['origin/feat/y'])
+  })
+
+  test('the branch count: local and remote counted once by name, the base and HEAD left out', () => {
+    const refs = ['refs/heads/main', 'refs/heads/feat/a', 'refs/heads/solo', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/feat/a', 'refs/remotes/origin/old']
+    expect(countBranches(refs.join('\n'), 'origin', 'main')).toBe(3)
+    expect(countBranches('refs/heads/main\n', 'origin', 'main')).toBe(0)
   })
 
   test('shortstat: insertions and deletions, either missing', () => {

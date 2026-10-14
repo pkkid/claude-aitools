@@ -47,8 +47,9 @@ left of **🛠**. Pressing it runs `/askme`.
 ### Project row
 
 In a GitHub repository a second row shows the project you're working on: the repository's name and the issue the
-session is about (from your first message, or the branch name), each opening in your browser, and how many items are
-open on its GitHub Project board (`Project: 3 items`, opening the Project pane).
+session is about (from your first message, or the branch name), each opening in your browser; how many items are
+open on its GitHub Project board (`3 project items`, opening the Project pane); how many branches it has besides main
+(`5 branches`, opening the Branches pane); and how many background tasks are running (`2 bg tasks`).
 On the right go the tools your project's own `.claude/aitools.json` defines: links, commands such as tests, and
 servers with a status and a Start/Stop button. See [the project row](plugins/aitools/README.md#project-row) for the
 file.
@@ -69,8 +70,8 @@ are separate toggles: turn on either, both or neither.
 
 ### Background tasks
 
-For bigger jobs Claude hands pieces to subagents and runs commands and monitors in the background. The project row
-counts the ones running (`3 tasks`, right of the project's name), and pressing it opens the **Background tasks** pane:
+For bigger jobs Claude hands pieces to subagents and workflows, and watches things with monitors. The project row
+counts the ones running (`3 bg tasks`), and pressing it opens the **Background tasks** pane:
 each task with its type, what it is doing, how far along a subagent is and how long it has run. Clawd gets a mini Clawd
 stacked on his head for every task at work.
 

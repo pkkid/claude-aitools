@@ -120,6 +120,20 @@ export function parseRefs(stdout: string): { locals: Map<string, LocalRef>; remo
   return { locals, remotes }
 }
 
+/**
+ * How many branches a repository has besides the base, local and remote counted once by name, from
+ * `git for-each-ref --format=%(refname) refs/heads refs/remotes/<remote>`.
+ */
+export function countBranches(stdout: string, remote: string, base: string): number {
+  const names = new Set<string>()
+  for (const ref of stdout.split('\n').map(l => l.trim())) {
+    const name = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref.startsWith(`refs/remotes/${remote}/`) ? ref.slice(`refs/remotes/${remote}/`.length) : null
+    if (name !== null && name !== 'HEAD' && name !== base) names.add(name)
+  }
+
+  return names.size
+}
+
 /** Lines added and removed from `git diff --shortstat`. */
 export function parseShortstat(stdout: string): { added: number; removed: number } {
   return {

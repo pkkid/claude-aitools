@@ -250,8 +250,8 @@ request finishes.
 
 ## Background tasks
 
-While any background task runs, the [project row](#project-row) counts them right of the project's name (`1 task`,
-`3 tasks`); pressing it opens the Background tasks pane. **Tasks** in the **🛠** menu opens it too (where
+While any background task runs, the [project row](#project-row) counts them (`1 bg task`, `3 bg tasks`); pressing it
+opens the Background tasks pane. **Tasks** in the **🛠** menu opens it too (where
 there is no project row), and `/tasks` opens it, or closes it if open; the pane's own close mark closes it. It stays
 open until you close it, and comes back after the mod reloads.
 
@@ -259,28 +259,31 @@ On the desktop, Clawd stands left of the pane's option rows with a mini Clawd st
 running in the list (the stack stops growing at four), and sleeps in quiet grey when none is. The header line under
 the options sits beside him too. The terminal has no picture.
 
-Every background task of the session gets a line, whether the pane is open or not, one per line with its type:
+Every subagent, workflow agent and monitor of the session gets a line, whether the pane is open or not, one per line
+with its type:
 
 - **Subagent**: a subagent Claude starts with its Agent tool (foreground or background).
 - **Workflow**: an agent of a workflow Claude starts, named after the workflow (`review-changes · agent 3`, since a
   workflow's agents have no names of their own).
-- **Command**: a shell command run in the background, or sent there with Ctrl+B: its description, then the command.
 - **Monitor**: a monitor watching a command's output or a socket: its description, then what it watches.
+
+Shell commands run in the background get no line: Claude Code offers no way to ask whether one is still running, so a
+line whose end notice was missed would stay running for good. Claude Code lists them itself.
 
 The ones running come first (oldest first), then the finished ones, the most recently finished first. Marks are Task
 View's: a blue ● running, a ✓ done, a red × failed, and a dim × stopped (killed by you or Claude). A running task's
 name is a lighter grey, followed in dim grey by what it is doing (a subagent's latest tool call, `Reading bar.tsx`, or
-a command's command line) and its running time. A line's name and what it is doing take the room the pane's width
+what a monitor watches) and its running time. A line's name and what it is doing take the room the pane's width
 leaves, cut with `…` at the edge. A finished line is all dim (but a failed one's ×): no bar, just how long it ran and
 how long ago it finished, `0:09 (3m ago)`.
 
 ```
-Showing: [All] Subagents  Workflows  Commands  Monitors
+Showing: [All] Subagents  Workflows  Monitors
 Hide after: [Never] 1h  15m  5m  Immediate
 
 2 running · 1 done
 ● Subagent Research business licenses · Reading the city site          40% ▰▰▱▱▱▱  1:20
-● Command  Start the dev server · npm run dev                                       4:02
+● Monitor  Wait for the dev server · curl localhost:3000                             4:02
 ✓ Subagent Draft the floor plan                                          0:56 (3m ago)
 ```
 
@@ -291,17 +294,16 @@ Tasks run as Claude Code normally runs them: the pane only watches, adding no no
 model and putting nothing in the status line. Tracking costs no tokens: the lines are kept in memory for the session.
 
 - A task's end is what Claude Code's own notice of it says (completed, failed, killed), whether the notice arrives
-  as a prompt of its own or inside a running turn, the main chat's or the subagent's that started it. A command a
-  synchronous subagent ran in the background stops when that subagent answers, with no notice, so its line ends as
-  stopped then. A subagent whose end was missed is settled when Claude next replies; a monitor whose closing notice
-  never comes ends a minute past its deadline.
+  as a prompt of its own or inside a running turn, the main chat's or the subagent's that started it. A subagent
+  whose end was missed is settled when Claude next replies; a monitor whose closing notice never comes ends a minute
+  past its deadline.
 - Only while the pane is open, every subagent Claude starts with its Agent tool has its prompt ask it to report how
   far along it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`); once it does, its line
-  shows its percent (its own estimate) and a bar. Workflow agents, commands, monitors, and subagents started while the
+  shows its percent (its own estimate) and a bar. Workflow agents, monitors, and subagents started while the
   pane was closed are not asked, so they show no bar.
-- **Showing**: **All** (the default) lists every line; **Subagents**, **Workflows**, **Commands** and **Monitors**
-  each list only that type. With nothing to list, the pane says what will appear there, e.g. `Background commands
-  will appear here when started.`
+- **Showing**: **All** (the default) lists every line; **Subagents**, **Workflows** and **Monitors** each list only
+  that type. With nothing to list, the pane says what will appear there, e.g. `Monitors will appear here when
+  started.`
 - **Hide after**: how long a finished line stays: **Never** (the default), **1h**, **15m**, **5m** or
   **Immediate**. Either way the pane keeps at most the newest 50 finished lines.
 - The Showing and Hide after picks are saved.
@@ -311,7 +313,8 @@ model and putting nothing in the status line. Tracking costs no tokens: the line
 
 ## Branches
 
-**Branches** in the **🛠** menu opens the Branches pane; the pane's own close mark closes it. `/branches` opens it,
+**Branches** in the **🛠** menu, or the project row's `5 branches`, opens the Branches pane; the pane's own close mark
+closes it. `/branches` opens it,
 or closes it if open. It stays open until you close it, and comes back after the mod reloads.
 
 On the desktop, Clawd stands left of the pane's controls, snipping a stray branch off a tree. He sweeps with a broom
@@ -390,19 +393,22 @@ calls). **Refresh**, right of **Clean up**, does all of that now. Without `gh`, 
 In a GitHub repository a second row sits under the bar, for the project the session works in:
 
 ```
-Vowelit  Project: 3 items  2 tasks  #42 Login fails on Safari       ● Running feat/42-login  Stop Server  Docs
+Vowelit  3 project items  5 branches  2 bg tasks  #42 Login fails…  ● Running feat/42-login  Stop Server  Docs
 ```
 
 On the left:
 
 - **The repository's name**, as GitHub has it, from the main checkout's GitHub remote (`origin` first),
   opening the repository in your browser. `name` in the project file shows a name of your own instead, as written.
-- **`Project: 3 items`**: how many items are open on the repository's GitHub Project board (as the
+- **`3 project items`**: how many items are open on the repository's GitHub Project board (as the
   [Project pane](#project-pane)'s Open filter counts them), while any is; it opens the Project pane, whose **Open in
   GitHub** opens the board. The board is the one linked to the repository, when exactly one is, looked up once a day
   through `gh`, which needs the `read:project` scope (`gh auth refresh -s read:project`); without it, name the board
   in the project file. Its items are read every 5 minutes while the row shows (see the Project pane).
-- **`2 tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
+- **`5 branches`**: how many branches the repository has besides the base branch (`main`), on your computer and on
+  the remote, each counted once by name, while it has any; it opens the [Branches pane](#branches). It's read with
+  one `git for-each-ref` every 30 seconds and shortly after a tool that can change files.
+- **`2 bg tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
 - **The issue** the session is about: the first `#123` or `…/issues/123` in the session's first prompt (the context
   Claude Code adds to it is left out), else a number the branch is named for: `feat/123-login`, `123-fix`,
   `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
@@ -472,7 +478,7 @@ dim line in the chat saying why; the rest of the row still shows.
 
 ## Project pane
 
-**Project** in the **🛠** menu, or the project row's `Project: 3 items`, opens a pane listing the items on the
+**Project** in the **🛠** menu, or the project row's `3 project items`, opens a pane listing the items on the
 repository's GitHub Project board: open ones first, each Status column in the board's order, the most recently
 changed first within a column:
 

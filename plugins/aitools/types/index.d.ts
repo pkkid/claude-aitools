@@ -57,9 +57,9 @@ export type HideAfter = 0 | 5 | 15 | 60 | 'never'
 
 /**
  * What a background task is: a subagent Claude started, one of a workflow's agents (named for its workflow,
- * numbered), a shell command running in the background, or a monitor watching a command's output.
+ * numbered), or a monitor watching a command's output.
  */
-export type AgentKind = 'subagent' | 'workflow' | 'command' | 'monitor'
+export type AgentKind = 'subagent' | 'workflow' | 'monitor'
 
 /** One background task's line in the Background tasks pane. */
 export type AgentCard = {
@@ -74,8 +74,6 @@ export type AgentCard = {
   endedAt?: number
   /** A monitor's deadline, when it has one: it ends then if no notice says so sooner. */
   expiresAt?: number
-  /** The subagent a command ends with: one a synchronous subagent ran in the background stops when it answers. */
-  endsWith?: string
 }
 
 /** The background tasks seen this session. */
@@ -314,6 +312,8 @@ declare module 'claude-code' {
       agentRun: AgentRun | null
       /** How many of them are running: what the project row's button shows. */
       runningTasks: number
+      /** How many branches the repository has besides the base, for the project row; null before a read. */
+      branchCount: number | null
       /** Bumped every second while subagents run, so their times redraw. */
       dockTick: number
       /** What the mascot shows; a new session starts it waving. */

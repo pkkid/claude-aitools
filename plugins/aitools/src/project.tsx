@@ -1,8 +1,8 @@
 /**
  * The project row: a second line under the bar for the GitHub repository the session works in. On the left the
  * repository's name (opening it in the browser), how many items are open on its GitHub Project board (opening the
- * Project pane), how many background tasks run (opening their pane) and the issue the session is about (opening in the
- * browser); on
+ * Project pane), how many branches it has besides the base (opening the Branches pane), how many background tasks run
+ * (opening their pane) and the issue the session is about (opening in the browser); on
  * the right the tools the project's own `.claude/aitools.json` defines (links, servers, commands). Outside a GitHub
  * repository the row is not drawn.
  */
@@ -197,15 +197,22 @@ export type RowView = {
   listeners: Readonly<Record<string, ToolListener | null>>
   /** How many items are open on the board, null before it is read: a button after the name opens the Project pane. */
   openItems: number | null
-  /** How many background tasks are running: a button after the board's opens their pane while any is. */
+  /** How many branches the repository has besides the base, null before a read: a button opens the Branches pane. */
+  branches: number | null
+  /** How many background tasks are running: a button after the branches' opens their pane while any is. */
   tasks: number
   /** Room between neighboring buttons: the desktop's own chrome parts them, the terminal needs spaces. */
   gap: number
 }
 
-/** The board button's label: `Project: 1 item`, `Project: 3 items`. */
+/** The board button's label: `1 project item`, `32 project items`. */
 export function itemsLabel(n: number): string {
-  return `Project: ${n} ${n === 1 ? 'item' : 'items'}`
+  return `${n} project ${n === 1 ? 'item' : 'items'}`
+}
+
+/** The branches button's label: `1 branch`, `5 branches`. */
+export function branchesLabel(n: number): string {
+  return `${n} ${n === 1 ? 'branch' : 'branches'}`
 }
 
 /** The issue button's label: its number, then its title cut to fit. */
@@ -228,6 +235,7 @@ export function renderProjectRow(
     runCommand(id: string): void
     openTasks(): void
     openBoard(): void
+    openBranches(): void
   },
 ) {
   const { Box, Text, Button } = el
@@ -239,6 +247,9 @@ export function renderProjectRow(
         <Button key="project-name" label={view.name} {...QUIET} onPress={() => on.open(repo.url)} />
         {view.boardUrl !== null && view.openItems !== null && view.openItems > 0 && (
           <Button key="project-board" label={itemsLabel(view.openItems)} {...QUIET} onPress={() => on.openBoard()} />
+        )}
+        {view.branches !== null && view.branches > 0 && (
+          <Button key="project-branches" label={branchesLabel(view.branches)} {...QUIET} onPress={() => on.openBranches()} />
         )}
         {view.tasks > 0 && <Button key="project-tasks" label={tasksLabel(view.tasks)} {...QUIET} onPress={() => on.openTasks()} />}
         {view.issue !== null && (

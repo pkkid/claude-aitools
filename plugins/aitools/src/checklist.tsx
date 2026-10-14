@@ -171,20 +171,26 @@ const MARKS = { done: '✓', doing: '●', todo: '○' } as const
 /** Done marks green, the step in progress blue; steps not started stay dim. */
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 
+/** How far the steps sit in from the title row's fold mark, so they read as the title's. */
+export const STEP_INDENT = 2
+
 /** The collapse toggle's marks: ▸ folded to the title row, ▾ open. */
 export const FOLD_MARKS = { collapsed: '▸', expanded: '▾' } as const
 
 /**
  * The checklist in the band: a title row (▸ or ▾ to fold it, the title, how many steps are done, × to close it), then
- * the steps while work goes on; one line once every step is done. Folded, only the title row shows.
+ * the steps while work goes on, indented under the title; one line once every step is done. Folded, only the title
+ * row shows. `markGap` is the room between the fold mark and the title: the desktop's button chrome parts them already,
+ * the terminal's plain mark needs a space.
  */
 export function renderChecklist(
   el: El,
   list: Checklist | null,
   isWorking: boolean,
-  isCollapsed: boolean,
+  view: { isCollapsed: boolean; markGap: number },
   on: { toggle(): void; close(): void },
 ) {
+  const { isCollapsed } = view
   const { Box, Text, Button } = el
   if (list === null) {
     return null
@@ -204,7 +210,7 @@ export function renderChecklist(
   }
   const titleRow = (
     <Box key="checklist-title" flexDirection="row" justifyContent="space-between">
-      <Box flexDirection="row" flexShrink={1} minWidth={0} columnGap={1}>
+      <Box flexDirection="row" flexShrink={1} minWidth={0} columnGap={view.markGap}>
         <Button
           key="checklist-fold"
           label={isCollapsed ? FOLD_MARKS.collapsed : FOLD_MARKS.expanded}
@@ -234,7 +240,7 @@ export function renderChecklist(
         const bar = progressBar(percent)
 
         return (
-          <Box key={`item-${i}`} flexDirection="row" justifyContent="space-between">
+          <Box key={`item-${i}`} flexDirection="row" justifyContent="space-between" paddingLeft={STEP_INDENT}>
             <Box flexDirection="row" flexShrink={1}>
               <Text color={MARK_COLORS[item.status]} dimColor={item.status === 'todo'}>{`${MARKS[item.status]} `}</Text>
               <Text

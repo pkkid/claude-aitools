@@ -570,6 +570,10 @@ describe('wiring', () => {
       await $.tool.call({ tool: CHECKLIST, ...PLAN })
       const ui = await $.ui.mount(band())
       expect((await ui.find({ key: 'checklist-fold' }))?.text).toBe('▾')
+      // The steps sit in under the title; on the desktop the fold button's own chrome parts it from the title.
+      const boxes = await ui.findAll({ type: 'Box' })
+      expect(boxes.filter(b => typeof b.props.key === 'string' && b.props.key.startsWith('item-')).map(b => b.props.paddingLeft)).toEqual([2, 2, 2])
+      expect(boxes.some(b => b.props.columnGap === 0 && b.text.startsWith('▾Dark mode'))).toBe(true)
       await ui.press({ key: 'checklist-fold' })
       expect((await ui.find({ key: 'checklist-fold' }))?.text).toBe('▸')
       expect(await barText($)).toContain('Dark mode')
@@ -834,8 +838,8 @@ describe('wiring', () => {
       expect(await pane.find({ text: 'Background tasks will appear here when started.' })).toBeDefined()
       await pane.press({ key: 'showing-subagent' })
       expect(await pane.find({ text: 'Subagents will appear here when started.' })).toBeDefined()
-      await pane.press({ key: 'showing-command' })
-      expect(await pane.find({ text: 'Background commands will appear here when started.' })).toBeDefined()
+      await pane.press({ key: 'showing-monitor' })
+      expect(await pane.find({ text: 'Monitors will appear here when started.' })).toBeDefined()
       await pane.unmount()
     })
 
@@ -922,21 +926,21 @@ describe('wiring', () => {
     test('Showing and Hide after: their own rows, applied to the lines', async ($, on) => {
       on('prompt.submit', (_, e) => ({ text: e.text }))
       coreSpawn(on, [])
-      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' } }))
+      on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'm1', persistent: true } }))
       await start($, on, { usd: 0 })
       await run($, 'tasks')
       await spawn($, 'Earlier job')
       await $.turn.complete({ ...complete('s1', 'agent-1'), answer: 'Done.' })
       await clock.advance(6 * 60_000)
-      await $.tool.call({ tool: 'Bash', command: 'npm run dev', description: 'Current job', run_in_background: true })
+      await $.tool.call({ tool: 'Monitor', description: 'Current job', command: 'adb devices', persistent: true } as never)
       const pane = await $.ui.mount({ ...DOCK, requestId: 'tasks' })
-      expect(await picks(pane, 'showing-')).toEqual(['showing-all', 'showing-subagent', 'showing-workflow', 'showing-command', 'showing-monitor'])
+      expect(await picks(pane, 'showing-')).toEqual(['showing-all', 'showing-subagent', 'showing-workflow', 'showing-monitor'])
       expect(await picks(pane, 'hide-')).toEqual(['hide-never', 'hide-60', 'hide-15', 'hide-5', 'hide-0'])
       expect(await pick(pane, 'showing-all')).toBe('[x] All')
       expect(await pick(pane, 'hide-never')).toBe('[x] Never')
       expect(await pick(pane, 'hide-0')).toBe('[ ] Immediate')
       expect(await pane.find({ text: 'Earlier job' })).toBeDefined()
-      await pane.press({ key: 'showing-command' })
+      await pane.press({ key: 'showing-monitor' })
       expect(await pane.find({ text: 'Earlier job' })).toBeUndefined()
       expect(await pane.find({ text: 'Current job' })).toBeDefined()
       await pane.press({ key: 'showing-all' })
@@ -965,51 +969,28 @@ describe('wiring', () => {
       expect(await dockText($)).toContain('● Subagent Unwatched')
     })
 
-    test('a background command gets a line with its command, until its notice says how it ended', async ($, on) => {
-      let next = 0
-      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `b${++next}` } }))
-      on('prompt.submit', (_, e) => ({ text: e.text }))
+    test('a background command gets no line', async ($, on) => {
+      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' } }))
       await start($, on, { usd: 0 })
       await $.tool.call({ tool: 'Bash', command: 'npm run dev', description: 'Start the dev server', run_in_background: true })
-      await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests', run_in_background: true })
       await run($, 'tasks')
-      let text = await dockText($)
-      expect(text).toContain('2 running')
-      expect(text).toContain('● Command  Start the dev server · npm run dev')
-      const notice = (id: string, status: string) =>
-        `<task-notification>\n<task-id>${id}</task-id>\n<status>${status}</status>\n<summary>Background command done</summary>\n</task-notification>`
-      await $.prompt.submit({ text: notice('b2', 'failed'), wait: false, origin: { kind: 'task-notification' } as never })
-      await $.prompt.submit({ text: notice('b1', 'killed'), wait: false, origin: { kind: 'task-notification' } as never })
-      text = await dockText($)
-      expect(text).toContain('1 failed · 1 stopped')
-      expect(text).toContain('× Command  Run the tests')
+      expect(await dockText($)).toContain('Background tasks will appear here when started.')
     })
 
-    test("a notice delivered into a running turn, a subagent's included, ends its command too", async ($, on) => {
-      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bverhg9ya' } }))
+    test("a notice delivered into a running turn, a subagent's included, ends its task too", async ($, on) => {
+      on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'bverhg9ya', persistent: true } }))
       on('prompt.attachment', (_, e) => ({ text: e.text }))
       await start($, on, { usd: 0 })
-      await $.tool.call({ tool: 'Bash', command: 'gh pr checks 12 --watch', description: 'Wait for PR checks to finish', agentId: 'agent-1' } as never)
+      await $.tool.call({ tool: 'Monitor', description: 'Wait for PR checks', command: 'gh pr checks 12 --watch', agentId: 'agent-1' } as never)
       await run($, 'tasks')
-      expect(await dockText($)).toContain('● Command  Wait for PR checks to finish')
+      expect(await dockText($)).toContain('● Monitor  Wait for PR checks')
       const notice =
         '<task-notification>\n<task-id>bverhg9ya</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n' +
-        '<summary>Background command "Wait for PR checks to finish" completed (exit code 0)</summary>\n</task-notification>'
+        '<summary>Monitor "Wait for PR checks" completed</summary>\n</task-notification>'
       await $.prompt.attachment({ type: 'queued_command', text: notice, origin: { kind: 'engine' }, agentId: 'agent-1' })
       const text = await dockText($)
       expect(text).toContain('1 done')
-      expect(text).toContain('✓ Command  Wait for PR checks to finish')
-    })
-
-    test("a synchronous subagent's background command stops when the subagent answers", async ($, on) => {
-      on('tool.call', { tool: 'Bash' }, () => ({
-        result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1', backgroundEndsWithFinalResponse: true },
-      }))
-      await start($, on, { usd: 0 })
-      await $.tool.call({ tool: 'Bash', command: 'npm run dev', description: 'Start the dev server', agentId: 'agent-7' } as never)
-      await $.turn.complete({ ...complete('s1', 'agent-7'), answer: 'Done.' })
-      await run($, 'tasks')
-      expect(await dockText($)).toContain('× Command  Start the dev server')
+      expect(text).toContain('✓ Monitor  Wait for PR checks')
     })
 
     test('a monitor ends at its closing notice, or once its deadline has passed; TaskStop stops a task', async ($, on) => {
@@ -1883,6 +1864,8 @@ describe('wiring', () => {
       remote: string
       branch: string
       listener: string
+      /** The branch refs `git for-each-ref` lists. */
+      refs: string[]
       spawned: string[][]
       /** Ends the running server child, as its process exiting would. */
       endServer: () => void
@@ -1890,7 +1873,7 @@ describe('wiring', () => {
 
     /** A checkout at /r with a GitHub remote, a disk of `files`, a browser, `ss`, `gh` and a server to spawn. */
     function world(on: On, files: Record<string, string> = {}): World {
-      const w: World = { files: new Map(Object.entries(files)), calls: [], opened: [], remote: 'git@github.com:pkkid/vowelit.git', branch: 'main', listener: '', spawned: [], endServer: () => undefined }
+      const w: World = { files: new Map(Object.entries(files)), calls: [], opened: [], remote: 'git@github.com:pkkid/vowelit.git', branch: 'main', listener: '', refs: [], spawned: [], endServer: () => undefined }
       on('session.cwd', () => ({ value: '/r' }))
       on('fs.exists', (_, e) => ({ value: w.files.has(e.path) }))
       on('fs.read', (_, e) => ({ value: w.files.get(e.path) ?? '' }))
@@ -1907,6 +1890,8 @@ describe('wiring', () => {
         if (cmd === 'git' && args[0] === 'rev-parse') return ok(args[1] === '--show-toplevel' ? '/r\n' : '/r/.git\n')
         if (cmd === 'git' && args[0] === 'remote') return ok(`origin\t${w.remote} (fetch)\norigin\t${w.remote} (push)\n`)
         if (cmd === 'git' && args[0] === 'branch') return ok(`${w.branch}\n`)
+        if (cmd === 'git' && args[0] === 'symbolic-ref') return ok('origin/main\n')
+        if (cmd === 'git' && args[0] === 'for-each-ref') return ok(w.refs.join('\n'))
         if (cmd === 'gh' && args[1] === 'graphql' && args.includes('login=pkkid')) return ok(JSON.stringify(BOARD_ANSWER))
         if (cmd === 'gh' && args[1] === 'graphql') return ok(JSON.stringify({ data: { repository: { projectsV2: { totalCount: 1, nodes: [{ url: 'https://github.com/users/pkkid/projects/1' }] } } } }))
         if (cmd === 'gh' && args[1]?.includes('/issues/')) return ok(`Issue ${args[1].split('/').at(-1)} title\n`)
@@ -2014,6 +1999,23 @@ describe('wiring', () => {
       expect(await rowText($)).toEqual({})
     })
 
+    test("the branches besides main show after the board's items, local and remote counted once; pressing it opens their pane", async ($, on) => {
+      const w = world(on)
+      w.refs = ['refs/heads/main', 'refs/heads/feat/a', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/feat/a', 'refs/remotes/origin/feat/b']
+      const panes = await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith('project-'))
+      expect(keys).toEqual(['project-name', 'project-board', 'project-branches'])
+      expect((await ui.find({ key: 'project-branches' }))?.text).toBe('2 branches')
+      await ui.press({ key: 'project-branches' })
+      await ui.unmount()
+      expect(panes.open.has('branches')).toBe(true)
+      // Only main left: no button, and it is read again with the repository every 30 seconds.
+      w.refs = ['refs/heads/main', 'refs/remotes/origin/main']
+      await clock.advance(30_000)
+      expect((await rowText($))['project-branches']).toBeUndefined()
+    })
+
     test('the checklist sits between the bar and the project row', async ($, on) => {
       world(on)
       await start($, on, { usd: 0 }, { viewMode: 'task' })
@@ -2034,7 +2036,7 @@ describe('wiring', () => {
       await say($, 'and #50 too')
       const row = await rowText($)
       expect(row['project-name']).toBe('vowelit')
-      expect(row['project-board']).toBe('Project: 2 items')
+      expect(row['project-board']).toBe('2 project items')
       expect(row['project-issue']).toBe('#42 Issue 42 title')
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'project-name' })
@@ -2061,17 +2063,17 @@ describe('wiring', () => {
 
     test('while background tasks run, the row counts them after the name; pressing it opens their pane', async ($, on) => {
       world(on)
-      on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' } }))
+      on('tool.call', { tool: 'Monitor' }, () => ({ result: { taskId: 'm1', persistent: true } }))
       on('prompt.submit', (_, e) => ({ text: e.text }))
       const panes = await start($, on, { usd: 0 })
       expect((await rowText($))['project-tasks']).toBeUndefined()
-      await $.tool.call({ tool: 'Bash', command: 'npm run dev', run_in_background: true })
-      expect((await rowText($))['project-tasks']).toBe('1 task')
+      await $.tool.call({ tool: 'Monitor', description: 'Dev server up', command: 'curl localhost:3000', persistent: true } as never)
+      expect((await rowText($))['project-tasks']).toBe('1 bg task')
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'project-tasks' })
       await ui.unmount()
       expect(panes.open.has('tasks')).toBe(true)
-      const done = '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>'
+      const done = '<task-notification>\n<task-id>m1</task-id>\n<status>completed</status>\n</task-notification>'
       await $.prompt.submit({ text: done, wait: false, origin: { kind: 'task-notification' } as never })
       expect((await rowText($))['project-tasks']).toBeUndefined()
     })

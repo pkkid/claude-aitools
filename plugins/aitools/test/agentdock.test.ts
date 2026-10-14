@@ -2,7 +2,6 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   addCard,
-  commandLine,
   noticeEnd,
   parseTaskNotices,
   runningCount,
@@ -120,7 +119,7 @@ describe('Showing and Hide after', () => {
     expect(ids(base)).toEqual(['old', 'wf', 'new'])
     expect(ids({ ...base, showing: 'subagent' })).toEqual(['old', 'new'])
     expect(ids({ ...base, showing: 'workflow' })).toEqual(['wf'])
-    expect(ids({ ...base, showing: 'command' })).toEqual([])
+    expect(ids({ ...base, showing: 'monitor' })).toEqual([])
   })
 
   test("a finished line goes once Hide after's time is up; Immediate hides it at once", () => {
@@ -135,15 +134,7 @@ describe('Showing and Hide after', () => {
   })
 })
 
-describe('background commands and monitors', () => {
-  test("a command's line is its description, else its command; the command is its note", () => {
-    expect(commandLine({ command: 'npm   run dev', description: 'Start the dev server' })).toEqual({
-      task: 'Start the dev server',
-      doing: 'npm run dev',
-    })
-    expect(commandLine({ command: 'npm run dev' })).toEqual({ task: 'npm run dev', doing: 'npm run dev' })
-  })
-
+describe('task notices and monitors', () => {
   test('task notices give each task id with its status or event', () => {
     const text =
       '<task-notification>\n<task-id>b7yjorn2h</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n' +
@@ -168,17 +159,17 @@ describe('background commands and monitors', () => {
   })
 
   test('a finished line keeps how it ended; the header counts stopped ones', () => {
-    let run = addCard(newRun(0), 'c1', 'Dev server', 0, 'command', { doing: 'npm run dev' })
+    let run = addCard(newRun(0), 'm1', 'Phone on adb', 0, 'monitor', { doing: 'adb devices' })
     expect(runningCount(run)).toBe(1)
-    run = finishCard(run, 'c1', 'stopped', 5)
-    run = finishCard(run, 'c1', 'done', 9)
-    expect(run.cards[0]).toMatchObject({ status: 'stopped', endedAt: 5, doing: 'npm run dev' })
+    run = finishCard(run, 'm1', 'stopped', 5)
+    run = finishCard(run, 'm1', 'done', 9)
+    expect(run.cards[0]).toMatchObject({ status: 'stopped', endedAt: 5, doing: 'adb devices' })
     expect(runningCount(run)).toBe(0)
     expect(headerText(run)).toBe('1 stopped')
   })
 
   test("the project row's button counts the running tasks", () => {
-    expect(tasksLabel(1)).toBe('1 task')
-    expect(tasksLabel(5)).toBe('5 tasks')
+    expect(tasksLabel(1)).toBe('1 bg task')
+    expect(tasksLabel(5)).toBe('5 bg tasks')
   })
 })

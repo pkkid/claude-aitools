@@ -10,12 +10,11 @@ import { TOTEM_HEIGHT, TOTEM_WIDTH, totemAlt, totemSvg } from './totem'
 /** How many finished tasks the pane keeps listing, newest first out of view last. */
 export const FINISHED_KEEP = 50
 /** The Showing picks, in order: every kind, then each kind on its own. */
-export const SHOWING_PICKS = ['all', 'subagent', 'workflow', 'command', 'monitor'] as const
+export const SHOWING_PICKS = ['all', 'subagent', 'workflow', 'monitor'] as const
 export const SHOWING_LABELS = {
   all: 'All',
   subagent: 'Subagents',
   workflow: 'Workflows',
-  command: 'Commands',
   monitor: 'Monitors',
 } as const
 /** What the pane says while the Showing pick leaves it no lines. */
@@ -23,11 +22,10 @@ export const EMPTY_LABELS = {
   all: 'Background tasks will appear here when started.',
   subagent: 'Subagents will appear here when started.',
   workflow: 'Workflow agents will appear here when started.',
-  command: 'Background commands will appear here when started.',
   monitor: 'Monitors will appear here when started.',
 } as const
 /** Each line's type column. */
-export const KIND_LABELS = { subagent: 'Subagent', workflow: 'Workflow', command: 'Command', monitor: 'Monitor' } as const
+export const KIND_LABELS = { subagent: 'Subagent', workflow: 'Workflow', monitor: 'Monitor' } as const
 /** The type column's width: its longest label and a space. */
 const KIND_WIDTH = 9
 /** The Hide after picks: never, then the longest wait to the shortest, in minutes. */
@@ -105,7 +103,7 @@ export function addCard(
   task: string,
   now: number,
   kind: AgentKind = 'subagent',
-  extra: Pick<AgentCard, 'doing' | 'expiresAt' | 'endsWith'> = {},
+  extra: Pick<AgentCard, 'doing' | 'expiresAt'> = {},
 ): AgentRun {
   if (run.cards.some(c => c.id === id)) {
     return run
@@ -167,13 +165,6 @@ export function workflowName(input: Record<string, unknown>): string {
   const script = typeof input.script === 'string' ? input.script : ''
 
   return /\bname\s*:\s*['"`]([^'"`]+)['"`]/.exec(script)?.[1] ?? 'workflow'
-}
-
-/** A background command's line: its description, else its command; the command itself is its note. */
-export function commandLine(input: { command?: unknown; description?: unknown }): { task: string; doing: string } {
-  const command = clip(input.command, 60)
-
-  return { task: clip(input.description, 60) || command || 'Background command', doing: command }
 }
 
 /** One background task's notice, as the chat receives it: its id, and its status or event when it gives one. */
@@ -243,9 +234,9 @@ export function runningCount(run: AgentRun | null): number {
   return run?.cards.filter(c => c.status === 'running').length ?? 0
 }
 
-/** The project row's button: `1 task`, `5 tasks`. */
+/** The project row's button: `1 bg task`, `5 bg tasks` (background tasks, as Claude Code calls them). */
 export function tasksLabel(n: number): string {
-  return n === 1 ? '1 task' : `${n} tasks`
+  return n === 1 ? '1 bg task' : `${n} bg tasks`
 }
 
 /** The pane's header line: the non-zero counts. */
