@@ -2678,6 +2678,7 @@ export const register: Register = on => {
       confirm: () => void confirmBranches($),
       cancel: () => void askBranches($, null),
       refresh: () => void refreshBranchesNow($),
+      open: url => void openInBrowser($, url),
       setWhere: where => void setBranchesWhere($, where),
       setShow: show => void setBranchesShow($, show),
     })

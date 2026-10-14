@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import { SUBAGENT_NOTE } from '../src/agentdock'
 import { askmeText } from '../src/askme'
+import { ID_WIDTH } from '../src/board'
 import { NOTE_SHRINK } from '../src/format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from '../src/palette'
 import { SETTINGS_PANE } from '../src/settingspane'
@@ -163,7 +164,7 @@ describe('wiring', () => {
     expect(text).toContain('thread $0.00')
     expect(text).not.toContain('12.40')
     expect(text).not.toContain('0.83')
-    expect(text).toContain('ctx —')
+    expect(text).toContain('ctx -')
   })
 
   test('last-turn cost spans the main turn, ignoring subagent turns', async ($, on) => {
@@ -189,7 +190,7 @@ describe('wiring', () => {
 
   test('a main-thread request starts the cache countdown', async ($, on) => {
     await start($, on, { usd: 0 })
-    expect(await barText($)).toContain('cache —')
+    expect(await barText($)).toContain('cache -')
     await step($)
     expect(await barText($)).toContain('cache 60m')
   })
@@ -197,7 +198,7 @@ describe('wiring', () => {
   test('subagent requests leave the cache countdown alone', async ($, on) => {
     await start($, on, { usd: 0 })
     await step($, 'sub')
-    expect(await barText($)).toContain('cache —')
+    expect(await barText($)).toContain('cache -')
   })
 
   test('a reload of the same session keeps thread and last-turn cost', async ($, on) => {
@@ -214,7 +215,7 @@ describe('wiring', () => {
     await start($, on, { usd: 0 })
     const usage = { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0 }
     await $.turn.complete({ ...complete('t1'), usage: { ...usage, model: 'claude-opus-5-5' } })
-    expect(await barText($)).toContain('tok — (+12k)')
+    expect(await barText($)).toContain('tok - (+12k)')
   })
 
   test('/handoff prints the brief to the chat and copies it, writing no file', async ($, on) => {
@@ -1474,7 +1475,7 @@ describe('wiring', () => {
      * A repository checked out in /p on main, with three worktrees (done, with changes, with unpushed commits) and a
      * branch only the remote has, merged long ago.
      */
-    type Repo = { calls: string[]; trees: Tree[]; refs: Ref[] }
+    type Repo = { calls: string[]; trees: Tree[]; refs: Ref[]; prs: object[] }
 
     /** Answers git and gh as that repository would, recording each command; what is removed leaves it. */
     function fakeRepo(on: On): Repo {
@@ -1493,6 +1494,7 @@ describe('wiring', () => {
           { name: 'feat/wip', sha: 'w', ahead: 2, local: true, remote: false },
           { name: 'old', sha: 'o', ahead: 0, local: false, remote: true },
         ],
+        prs: [],
       }
       on('session.cwd', () => ({ value: '/p' }))
       on('tool.call', () => ({ result: 'done' }))
@@ -1504,7 +1506,7 @@ describe('wiring', () => {
         repo.calls.push(`${cmd} ${args.join(' ')}`)
         const tree = repo.trees.find(t => t.path === cwd)
         if (cmd === 'gh') {
-          return ok(args[0] === 'pr' ? '[]' : JSON.stringify(repo.refs.map(r => ({ headSha: r.sha, status: 'completed', conclusion: 'success' }))))
+          return ok(args[0] === 'pr' ? JSON.stringify(repo.prs) : JSON.stringify(repo.refs.map(r => ({ headSha: r.sha, status: 'completed', conclusion: 'success' }))))
         }
         switch (args[0]) {
           case 'rev-parse':
@@ -1576,7 +1578,7 @@ describe('wiring', () => {
       expect(text).toContain('Clean up removes 2 done branches: 1 worktree, 1 local and 2 remote branches.')
       expect(text).toContain('feat/dirty · 2 changed')
       expect(text).toContain('feat/wip · 2 unpushed')
-      expect(text).toContain('+10−3')
+      expect(text).toContain('+10-3')
       const reads = repo.calls.length
       await clock.advance(10_000)
       expect(repo.calls.length).toBeGreaterThan(reads)
@@ -1686,9 +1688,9 @@ describe('wiring', () => {
         (await pane.findAll({ type: 'Text' })).map(t => t.text).filter(t => /^(main|feat\/[a-z]+|old)$/.test(t))
       expect(await picks(pane, 'where-')).toEqual(['where-both', 'where-local', 'where-remote'])
       expect(await picks(pane, 'show-')).toEqual(['show-all', 'show-active', 'show-done'])
-      expect(await names()).toEqual(['main', 'feat/done', 'feat/dirty', 'feat/wip', 'old'])
+      expect(await names()).toEqual(['main', 'feat/dirty', 'feat/wip', 'feat/done', 'old'])
       await pane.press({ key: 'where-remote' })
-      expect(await names()).toEqual(['main', 'feat/done', 'feat/dirty', 'old'])
+      expect(await names()).toEqual(['main', 'feat/dirty', 'feat/done', 'old'])
       await pane.press({ key: 'show-done' })
       expect(await names()).toEqual(['feat/done', 'old'])
       await pane.press({ key: 'where-local' })
@@ -1707,12 +1709,36 @@ describe('wiring', () => {
       const cells = await pane.findAll({ type: 'Box' })
       const widths = (key: string) => cells.filter(b => b.props.key === key).map(b => b.props.width)
       // The titles' row too, for the columns it names; then one per branch.
-      for (const [key, width] of [['on', 8], ['out', 13], ['age', 5], ['pr', 7], ['ci', 4], ['delete', 3]] as const) {
+      for (const [key, width] of [['on', 8], ['out', 12], ['age', 4], ['pr', 7], ['ci', 3], ['delete', 3]] as const) {
         expect(widths(key)).toEqual(Array(6).fill(width))
       }
-      for (const [key, width] of [['added', 8], ['removed', 7]] as const) {
+      for (const [key, width] of [['added', 6], ['removed', 6]] as const) {
         expect(widths(key)).toEqual(Array(5).fill(width))
       }
+      await pane.unmount()
+    })
+
+    test("a done row is all faint, a ✓ included; a PR number opens the PR on GitHub", async ($, on) => {
+      const repo = fakeRepo(on)
+      const url = 'https://github.com/o/r/pull/12'
+      repo.prs = [{ number: 12, url, state: 'MERGED', headRefName: 'feat/done', headRefOid: 'd', statusCheckRollup: [] }]
+      await start($, on, { usd: 0 })
+      await run($, 'branches')
+      await clock.settle()
+      const pane = await $.ui.mount(BR)
+      const texts = await pane.findAll({ type: 'Text' })
+      const row = (name: string) => {
+        const from = texts.findIndex(t => t.text === name)
+        const to = texts.findIndex((t, i) => i > from && /^(main|feat\/[a-z]+|old)$/.test(t.text))
+        return texts.slice(from - 1, to === -1 ? undefined : to - 1)
+      }
+      const done = row('feat/done')
+      expect(done[0]?.text).toBe('✓ ')
+      expect(done.filter(t => t.text.trim() !== '').map(t => t.props.color)).toEqual(done.filter(t => t.text.trim() !== '').map(() => FAINT_TEXT))
+      expect(row('feat/dirty').find(t => t.text === '+10')?.props.color).toBe(GREEN)
+      await pane.press({ key: 'pr-12' })
+      await clock.settle()
+      expect(repo.calls).toContain(`xdg-open ${url}`)
       await pane.unmount()
     })
 
@@ -2185,6 +2211,10 @@ describe('wiring', () => {
         expect(texts).not.toContain('Admin page')
         expect((await pane.find({ key: 'filter-open' }))?.text).toBe('● Open 2')
         expect((await pane.find({ type: 'Svg' }))?.props.alt).toBe('Clawd stacking task blocks')
+        // The id column has room for a five-digit `#12345`, whatever the board's own ids are.
+        const ids = (await pane.findAll({ type: 'Box' })).filter(b => b.props.key === 'id').map(b => b.props.width)
+        expect(ids.length).toBeGreaterThan(0)
+        expect(ids.every(width => width === ID_WIDTH)).toBe(true)
         await pane.press({ key: 'filter-done' })
         await pane.press({ key: 'open' })
         await clock.settle()

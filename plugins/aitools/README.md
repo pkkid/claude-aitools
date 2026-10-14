@@ -23,7 +23,7 @@ AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k) 
 | `month $184.20` | This calendar month's Claude Code usage at API prices, across all sessions on this machine |
 | `limit ~3:40pm` | At your pace over the last hour, when the 5-hour window would run out; shown only if before it resets |
 
-Labels are dim and values a lighter grey; usage and context values turn yellow at 70% and red at 90%. A value not known yet shows `—`; until the first response of a
+Labels are dim and values a lighter grey; usage and context values turn yellow at 70% and red at 90%. A value not known yet shows `-`; until the first response of a
 session the bar shows the figures from your previous session.
 
 ## Show or hide the bar
@@ -330,16 +330,17 @@ Clean up removes 3 done branches: 1 worktree, 1 local and 2 remote branches.
 
 Clean up 3 done  Refresh
 
-  Branch                                       On      Checked out   Last  Changes     PR   CI
-○ main · base                                  both    main folder     5m        –      –   ✓
-● feat/background-tasks · 3 changed            both    worktree       12m  +612  −48   #12   ●  ×
-↑ feat/totem-sizes · 2 unpushed                local   worktree        2d   +96 −210     –   –  ×
-✓ claude/repo-rename-watcher-setup-f7486b · …  local   worktree       11h        –      –   –  ×
-✓ feat/project-pane                            remote  –              29h        –     #6   ✓  ×
-✓ feat/project-row                             remote  –               2d        –     #5   ✓  ×
+  Branch                                       On     Checked out Last     Changes     PR CI
+○ main · base                                  both   main folder   5m     -     -      - •
+● feat/background-tasks · 3 changed            both   worktree     12m  +612   -48    #12 •  ×
+↑ feat/totem-sizes · 2 unpushed                local  worktree      2d   +96  -210      - -  ×
+✓ claude/repo-rename-watcher-setup-f7486b · …  local  worktree     11h     -     -      - -  ×
+✓ feat/project-pane                            remote -            29h     -     -     #6 •  ×
+✓ feat/project-row                             remote -             2d     -     -     #5 •  ×
 ```
 
-One row is one branch, wherever it lives. A worktree is where a branch is checked out, so it shows on its branch's row
+The base branch is always the top row, then the branches with work to keep, then the done ones, each newest commit
+first (the main folder's and this session's lead their group). One row is one branch, wherever it lives. A worktree is where a branch is checked out, so it shows on its branch's row
 rather than as a row of its own. The desktop app checks its worktrees out detached, beside a branch named for the
 folder (`claude/<folder>`); such a worktree joins that branch's row, and one no branch matches is a row of its own,
 named by its folder.
@@ -354,15 +355,17 @@ named by its folder.
 Each row:
 
 - **The mark**: a blue ● the branch this session is on, a yellow ● uncommitted changes in its worktree, a yellow ↑
-  commits not pushed, a green ✓ done, ○ anything else.
+  commits not pushed, a dim ✓ done, ○ anything else.
 - **The name**, then in dim grey what keeps it (`3 changed`, `2 unpushed`, `2 unmerged`), or `empty`, `base`, and
   what its worktree is (`detached`, `locked`, `folder missing`, `this session`), or `PR closed`. The name and these
-  words take the room the pane's width leaves, cut with `…` at the edge; a done branch's name is dim too.
+  words take the room the pane's width leaves, cut with `…` at the edge. A done branch's row is dim throughout, its
+  changes and CI included, as a finished background task's is.
 - **On the right**, in columns that line up on every row under their titles: **On** (`both`, `local` or `remote`),
-  **Checked out** (`main folder`, `worktree` or `–`), how long since its last commit, lines added and removed since it
-  left the base branch (its worktree's uncommitted work included), its pull request, CI, and ×.
-- **CI**: ✓ passed, × failed, ● still running, – none found: its pull request's checks at its commit, else the GitHub
-  Actions runs at its commit.
+  **Checked out** (`main folder`, `worktree` or `-`), how long since its last commit, lines added and removed since it
+  left the base branch (its worktree's uncommitted work included), its pull request (`#12`, which opens it on
+  GitHub), CI, and ×.
+- **CI**: a small dot, as GitHub shows it: green passed, red failed, yellow still running; `-` none found. It reads its
+  pull request's checks at its commit, else the GitHub Actions runs at its commit.
 - **×** asks on a line under the row what it takes, `Delete feat/x (worktree, local branch and remote branch)?`, with
   **Yes** and **No**, and what would be lost (`This loses 3 uncommitted files and 2 commits not on the base branch.`).
   Yes removes all of it. Pressing × again takes the question back. The base branch, the main folder's branch, this
@@ -386,7 +389,7 @@ The pane only reads git while it is open: when it opens, every 10 seconds, and a
 files (Bash, Edit, Write, a subagent). When it opens and every 5 minutes it also fetches from the remote (`git fetch
 --prune`, so branches deleted on GitHub go) and reads GitHub (pull requests and CI, through the `gh` command, two API
 calls). **Refresh**, right of **Clean up**, does all of that now. Without `gh`, or signed out, CI and pull requests show
-– and the rest works. Closed, it reads nothing.
+`-` and the rest works. Closed, it reads nothing.
 
 ## Project row
 

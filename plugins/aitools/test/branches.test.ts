@@ -174,8 +174,8 @@ describe('branches: one row per branch', () => {
     expect(rows.map(b => [b.name, onText(b), checkoutText(b)])).toEqual([
       ['main', 'both', 'main folder'],
       ['feat/x', 'both', 'worktree'],
-      ['solo', 'local', '–'],
-      ['feat/y', 'remote', '–'],
+      ['solo', 'local', '-'],
+      ['feat/y', 'remote', '-'],
     ])
     expect(byName(rows, 'main').state).toBe('base')
     expect(byName(rows, 'feat/x').state).toBe('active')
@@ -233,7 +233,7 @@ describe('branches: one row per branch', () => {
     expect([onText(owl), checkoutText(owl), owl.state]).toEqual(['local', 'worktree', 'empty'])
     expect(noteParts(owl)).toEqual(['empty', 'detached'])
     const lone = byName(rows, 'lone')
-    expect([onText(lone), lone.isLocal, lone.remote]).toEqual(['–', false, null])
+    expect([onText(lone), lone.isLocal, lone.remote]).toEqual(['-', false, null])
     expect(deleteText(lone).question).toBe('Delete lone (worktree)?')
   })
 })
@@ -259,8 +259,22 @@ describe('branches: filters, order and words', () => {
     expect(visibleBranches(rows, 'both', 'active').map(b => b.name)).toEqual(['main', 'feat/cur'])
   })
 
-  test('the base branch first, then the main folder, this session, then the latest commit', () => {
+  test('the base branch first, then active ones, then done ones; each the main folder, this session, then the latest commit', () => {
     expect(sortBranches(rows).map(b => b.name)).toEqual(['main', 'feat/cur', 'feat/done', 'old'])
+    const mixed = joinBranches(
+      facts({
+        entries: [entry('/repo', 'main', 'sha-main'), entry('/repo/wt/cur', 'feat/cur', 'sha-feat/cur')],
+        current: '/repo/wt/cur',
+        locals: new Map([
+          ['feat/done', local('feat/done', { committedAt: 9 })],
+          ['feat/old-wip', local('feat/old-wip', { aheadOfBase: 2, committedAt: 1 })],
+          ['feat/new-wip', local('feat/new-wip', { aheadOfBase: 1, committedAt: 7 })],
+          ['feat/cur', local('feat/cur', { committedAt: 2 })],
+          ['main', local('main', { committedAt: 3 })],
+        ]),
+      }),
+    )
+    expect(sortBranches(mixed).map(b => b.name)).toEqual(['main', 'feat/new-wip', 'feat/old-wip', 'feat/cur', 'feat/done'])
   })
 
   test('the base, the main folder and this session are never deleted; done ones are cleaned', () => {

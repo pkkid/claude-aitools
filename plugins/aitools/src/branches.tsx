@@ -375,14 +375,14 @@ function toBranch(d: Draft, f: RepoFacts): Branch {
 
 // ---- What the pane makes of the rows ----
 
-/** Where a branch lives, for the On column: `both`, `local`, `remote`, or `–` for a worktree with no branch. */
+/** Where a branch lives, for the On column: `both`, `local`, `remote`, or `-` for a worktree with no branch. */
 export function onText(b: Branch): string {
-  return b.isLocal && b.remote !== null ? 'both' : b.isLocal ? 'local' : b.remote !== null ? 'remote' : '–'
+  return b.isLocal && b.remote !== null ? 'both' : b.isLocal ? 'local' : b.remote !== null ? 'remote' : '-'
 }
 
 /** Where it is checked out, for its column: the main folder, a worktree, or nowhere. */
 export function checkoutText(b: Branch): string {
-  return b.checkout === null ? '–' : b.checkout.isMain ? 'main folder' : 'worktree'
+  return b.checkout === null ? '-' : b.checkout.isMain ? 'main folder' : 'worktree'
 }
 
 /** Whether the row offers its own delete: never on the base branch, the main folder's, this session's, or a locked one. */
@@ -404,11 +404,15 @@ export function visibleBranches(list: readonly Branch[], where: BranchesWhere, s
   return list.filter(b => isPlaced(b) && isShown(b))
 }
 
-/** Rows in order: the base branch, the main folder's, this session's, then the rest, the latest commit first. */
+/**
+ * Rows in order: the base branch, then the active ones, then the done ones (empty ones with them); within each, the
+ * main folder's, this session's, then the rest, the latest commit first.
+ */
 export function sortBranches(list: readonly Branch[]): Branch[] {
-  const rank = (b: Branch) => (b.state === 'base' ? 0 : b.checkout?.isMain ? 1 : b.checkout?.isCurrent ? 2 : 3)
+  const group = (b: Branch) => (b.state === 'base' ? 0 : b.state === 'done' || b.state === 'empty' ? 2 : 1)
+  const rank = (b: Branch) => (b.checkout?.isMain ? 0 : b.checkout?.isCurrent ? 1 : 2)
 
-  return [...list].sort((a, b) => rank(a) - rank(b) || (b.committedAt ?? 0) - (a.committedAt ?? 0))
+  return [...list].sort((a, b) => group(a) - group(b) || rank(a) - rank(b) || (b.committedAt ?? 0) - (a.committedAt ?? 0))
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
@@ -433,22 +437,22 @@ export function noteParts(b: Branch): string[] {
   return parts
 }
 
-/** The row's mark: ● blue where this session is, ● yellow with changes, ↑ yellow unpushed, ✓ green done, ○ else. */
+/** The row's mark: ● blue where this session is, ● yellow with changes, ↑ yellow unpushed, ✓ faint done, ○ else. */
 export function branchMark(b: Branch): { text: string; color: string } {
   if (b.checkout?.isCurrent) return { text: '●', color: BLUE }
   if (b.checkout && b.checkout.changedFiles > 0) return { text: '●', color: YELLOW }
   if (b.state === 'active' && b.unpushed > 0) return { text: '↑', color: YELLOW }
-  if (b.state === 'done' || b.state === 'empty') return { text: '✓', color: GREEN }
+  if (b.state === 'done' || b.state === 'empty') return { text: '✓', color: FAINT_TEXT }
 
   return { text: '○', color: FAINT_TEXT }
 }
 
-/** CI's mark: ✓ passed, × failed, ● running, – none. */
+/** CI's mark, a small dot as GitHub shows it: green passed, red failed, yellow running; - none. */
 export const CI_MARKS: Record<CiState, { text: string; color: string }> = {
-  pass: { text: '✓', color: GREEN },
-  fail: { text: '×', color: RED },
-  running: { text: '●', color: YELLOW },
-  none: { text: '–', color: FAINT_TEXT },
+  pass: { text: '•', color: GREEN },
+  fail: { text: '•', color: RED },
+  running: { text: '•', color: YELLOW },
+  none: { text: '-', color: FAINT_TEXT },
 }
 
 /** The header line: how many branches and worktrees the Branches filter leaves, and how many of them are done. */
@@ -532,6 +536,7 @@ type Actions = {
   confirm(): void
   cancel(): void
   refresh(): void
+  open(url: string): void
   setWhere(where: BranchesWhere): void
   setShow(show: BranchesShow): void
 }
@@ -653,7 +658,7 @@ function renderClean(el: El, all: readonly Branch[], action: BranchAction, on: A
  * pull request, CI, delete. Each sits in a box of its own width, so the columns line up on every row whatever is in
  * them: a desktop's native × button is wider than a cell, and rows without one keep its room empty.
  */
-export const COLUMNS = { on: 8, out: 13, age: 5, added: 8, removed: 7, pr: 7, ci: 4, delete: 3 } as const
+export const COLUMNS = { on: 8, out: 12, age: 4, added: 6, removed: 6, pr: 7, ci: 3, delete: 3 } as const
 
 type Justify = 'flex-start' | 'flex-end' | 'center'
 
@@ -690,9 +695,9 @@ function renderTitles(el: El) {
 
 /**
  * One branch's row: its mark, name and faint note on the left; where it lives and is checked out, how long since its
- * last commit, lines added and removed, its pull request, CI and × on the right, in fixed columns. Pressing × asks
- * first, on a line beneath the row, with what deleting it takes and would lose; pressing it again takes the question
- * back.
+ * last commit, lines added and removed, its pull request (pressing it opens it on GitHub), CI and × on the right, in
+ * fixed columns. A done branch's row is all faint, as a finished background task's is. Pressing × asks first, on a
+ * line beneath the row, with what deleting it takes and would lose; pressing it again takes the question back.
  */
 function renderRow(el: El, b: Branch, view: { action: BranchAction; now: number }, on: Actions) {
   const { Box, Text, Button } = el
@@ -706,6 +711,8 @@ function renderRow(el: El, b: Branch, view: { action: BranchAction; now: number 
   const ago = b.committedAt === null ? '' : age(view.now - b.committedAt)
   const ask = isAsking ? deleteText(b) : null
   const hasChanges = b.added > 0 || b.removed > 0
+  // A done row keeps its marks, but faint: only its delete button stands out.
+  const tone = (color: string) => (isFinished ? FAINT_TEXT : color)
 
   return (
     <Box key={`branch-${b.name}`} flexDirection="column">
@@ -729,10 +736,10 @@ function renderRow(el: El, b: Branch, view: { action: BranchAction; now: number 
           {cell(el, 'on', COLUMNS.on, <Text color={FAINT_TEXT}>{` ${onText(b)}`}</Text>, 'flex-start')}
           {cell(el, 'out', COLUMNS.out, <Text color={FAINT_TEXT}>{checkoutText(b)}</Text>, 'flex-start')}
           {cell(el, 'age', COLUMNS.age, <Text color={FAINT_TEXT}>{ago}</Text>)}
-          {cell(el, 'added', COLUMNS.added, hasChanges ? <Text color={GREEN}>{`+${b.added}`}</Text> : <Text color={FAINT_TEXT}>–</Text>)}
-          {cell(el, 'removed', COLUMNS.removed, hasChanges ? <Text color={RED}>{`−${b.removed}`}</Text> : null)}
-          {cell(el, 'pr', COLUMNS.pr, <Text color={FAINT_TEXT}>{b.pr === null ? '–' : `#${b.pr.number}`}</Text>)}
-          {cell(el, 'ci', COLUMNS.ci, <Text color={ci.color}>{ci.text}</Text>, 'center')}
+          {cell(el, 'added', COLUMNS.added, hasChanges ? <Text color={tone(GREEN)}>{`+${b.added}`}</Text> : <Text color={FAINT_TEXT}>-</Text>)}
+          {cell(el, 'removed', COLUMNS.removed, hasChanges ? <Text color={tone(RED)}>{`-${b.removed}`}</Text> : <Text color={FAINT_TEXT}>-</Text>)}
+          {cell(el, 'pr', COLUMNS.pr, renderPr(el, b.pr, on))}
+          {cell(el, 'ci', COLUMNS.ci, <Text color={tone(ci.color)}>{ci.text}</Text>, 'center')}
           {cell(
             el,
             'delete',
@@ -756,6 +763,17 @@ function renderRow(el: El, b: Branch, view: { action: BranchAction; now: number 
       )}
     </Box>
   )
+}
+
+/** A row's pull request: `#12`, a button that opens it on GitHub; `-` with none. */
+function renderPr(el: El, pr: BranchPr | null, on: Actions) {
+  const { Text, Button } = el
+  if (pr === null) {
+    return <Text color={FAINT_TEXT}>-</Text>
+  }
+  const label = `#${pr.number}`
+
+  return pr.url ? <Button key={`pr-${pr.number}`} label={label} plain dimColor onPress={() => on.open(pr.url)} /> : <Text color={FAINT_TEXT}>{label}</Text>
 }
 
 // ---- Removing ----

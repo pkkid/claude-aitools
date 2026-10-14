@@ -205,7 +205,7 @@ export function statusMark(status: string | null): { dot: string; color: string 
 
 /** The status column's text: its dot and name, a long name cut to fit STATUS_MAX cells. */
 export function statusText(status: string | null): string {
-  const chars = Array.from(`${statusMark(status).dot} ${status?.trim() || '–'}`)
+  const chars = Array.from(`${statusMark(status).dot} ${status?.trim() || '-'}`)
 
   return chars.length > STATUS_MAX ? `${chars.slice(0, STATUS_MAX - 1).join('')}…` : chars.join('')
 }
@@ -233,8 +233,13 @@ const FILTERS: readonly { filter: BoardFilter; label: string; empty: string }[] 
   { filter: 'all', label: 'All', empty: 'The board is empty.' },
 ]
 
-/** The PR column's width in cells: room for `PR #1234`. */
-export const PR_WIDTH = 9
+/**
+ * The id column's width in cells at least: room for a five-digit `#12345`, and the slack the desktop's id button needs
+ * around its label. A longer id (another repository's `name#12`) widens it.
+ */
+export const ID_WIDTH = 8
+/** The PR column's width in cells: room for `PR #12345`. */
+export const PR_WIDTH = 10
 /** The most cells the status column's text takes; a longer Status is cut. */
 export const STATUS_MAX = 16
 
@@ -348,7 +353,7 @@ function refreshButton(el: El, view: BoardView, on: BoardActions) {
 function renderRows(el: El, items: readonly BoardItem[], view: BoardView, on: BoardActions) {
   const { Box, Text, Button } = el
   const ids = items.map(item => itemId(item, view.repo))
-  const idWidth = Math.max(...ids.map(id => Array.from(id).length)) + 1
+  const idWidth = Math.max(ID_WIDTH, ...ids.map(id => Array.from(id).length + 2))
   const statusWidth = Math.max(...items.map(item => Array.from(statusText(item.status)).length)) + 1
   const cell = (key: string, width: number, child: RenderChildren) => (
     <Box key={key} width={width} flexShrink={0} flexDirection="row">

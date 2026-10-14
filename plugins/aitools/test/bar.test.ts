@@ -70,7 +70,7 @@ describe('segments', () => {
   })
 
   test('missing snapshot shows dashes', () => {
-    const dashes = ['5h —', 'wk —', 'ctx —', 'tok —', 'cache —', 'thread —']
+    const dashes = ['5h -', 'wk -', 'ctx -', 'tok -', 'cache -', 'thread -']
     expect(texts(view({ snapshot: null, cacheAt: null })).slice(0, 6)).toEqual(dashes)
   })
 
@@ -129,7 +129,7 @@ describe('cold-cache cost', () => {
   test('just after the warmth, cold or not', () => {
     expect(cache(18)).toBe('cache 42m, $0.50')
     expect(cache(61)).toBe('cache cold, $0.50')
-    expect(cache(null)).toBe('cache —, $0.50')
+    expect(cache(null)).toBe('cache -, $0.50')
   })
 
   test('on its own with the warmth off, and gone when its option is off', () => {

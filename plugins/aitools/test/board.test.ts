@@ -123,7 +123,7 @@ describe('board: the pane', () => {
     expect(statusMark('In Progress').color).toBe(YELLOW)
     expect(statusMark('Blocked').color).toBe(RED)
     expect(statusMark('Done').dot).toBe('●')
-    expect(statusText(null)).toBe('○ –')
+    expect(statusText(null)).toBe('○ -')
     expect(statusText('Waiting on design review')).toBe('● Waiting on de…')
   })
 

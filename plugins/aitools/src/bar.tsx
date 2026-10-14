@@ -36,7 +36,7 @@ export const CACHE_TTL = 60 * 60_000
 /** The bar's marker while /keepwarm runs: a sun with rays (U+263C), which has no color-emoji form. */
 export const KEEPWARM_MARK = '\u263C'
 
-const DASH = '—'
+const DASH = '-'
 const MIN = 60_000
 const CACHE_WARN = 10 * MIN
 const TONE_COLORS = { warn: YELLOW, danger: RED } as const
