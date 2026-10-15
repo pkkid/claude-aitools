@@ -13,14 +13,15 @@ function memoryStore(entries: Record<string, unknown> = {}): KeyStore {
 }
 
 describe('settings', () => {
-  test("nineteen toggles in the settings pane's groups, the mascot first and offered only where SVG draws, the project row after the bar's own", () => {
-    expect(TOGGLES).toHaveLength(19)
+  test("twenty toggles in the settings pane's groups, the mascot first and offered only where SVG draws, the project row after the bar's own", () => {
+    expect(TOGGLES).toHaveLength(20)
     expect(TOGGLES[0]).toMatchObject({ key: 'mascot', group: 'look', label: 'Show mascot', needsSvg: true })
     expect(TOGGLES.filter(t => t.needsSvg)).toHaveLength(1)
     expect(TOGGLES.map(t => t.group)).toEqual([
-      'look', 'look', 'look', 'look', ...Array(15).fill('meters'),
+      'look', 'look', 'look', 'look', 'look', ...Array(15).fill('meters'),
     ])
     expect(TOGGLES[3]).toMatchObject({ key: 'projectRow', group: 'look', label: 'Show project row' })
+    expect(TOGGLES[4]).toMatchObject({ key: 'statuslineFile', group: 'look', label: 'Statusline file', isOffByDefault: true })
     expect(TOGGLES.every(t => t.hint.length > 0)).toBe(true)
     // Every meter's options, together and in order; the bar's own look and the project row are options of no meter.
     expect([...new Set(TOGGLES.flatMap(t => (t.meter ? [t.meter] : [])))]).toEqual(['5-hour', 'Weekly', 'Context', 'Tokens', 'Cache', 'Thread cost', 'Month', 'Burn rate'])
@@ -32,8 +33,8 @@ describe('settings', () => {
     expect(normalizeSettings({ resets: false, weeklyReset: true })).toMatchObject({ fiveHourReset: false, weeklyReset: true })
   })
 
-  test('all default to on', () => {
-    expect(Object.values(DEFAULT_SETTINGS).every(Boolean)).toBe(true)
+  test('all but the statusline file default to on', () => {
+    expect(Object.entries(DEFAULT_SETTINGS).filter(([, on]) => !on).map(([key]) => key)).toEqual(['statuslineFile'])
   })
 
   test('normalize undefined gives defaults', () => {

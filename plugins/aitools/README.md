@@ -44,6 +44,7 @@ Global Settings  May be overridden by project settings
 ● Show title        AI Tools at the start of the bar
 ● Threshold colors  Yellow from 70%, red from 90%; a cache about to go cold
 ● Show project row  A second row: repo, board, issue and tools, in every project
+○ Statusline file   Written each turn, as the CLI's status line does: ~/.claude/statusline.json
 Meters
   5-hour            ● Percent  ● Reset  5h 42%, 1h12m
   Weekly            ● Percent  ● Reset  wk 18%, Thu
@@ -65,10 +66,18 @@ Project Settings  Saved for vowelit only
 ```
 
 **Global Settings** holds the bar's display options. First the bar's own: show mascot (offered on the
-desktop only), show title, threshold colors and show project row (in every project). Then each meter in the bar is one row, its options beside its name and
+desktop only), show title, threshold colors, show project row (in every project) and statusline file. Then each meter in the bar is one row, its options beside its name and
 a sample of it after them, all under **Meters** in the order the bar shows them: 5-hour, weekly, context, tokens, cache,
 thread cost, month and burn rate. A meter shows while any of its options is on. The **🛠** button always
 shows.
+
+**Statusline file** (off by default) writes `~/.claude/statusline.json` after each turn, in the shape
+of the JSON the CLI hands a `statusLine` command, so a program outside Claude (a desktop meter such as Conky) can read
+the 5-hour and weekly limits even from the desktop app, which runs no status line command. Fields the mod has no
+figure for are left out (`prompt_cache`, `effort`, `output_style` and the like). Each write goes to a private temp
+file that is then renamed over the old one, as a status line command would, so a reader never sees half a file and
+sessions writing at once each land whole; the last one wins, and the limits are the account's, so its reading is the
+newest.
 
 Global Settings are saved for all your projects, in your settings file. **Project Settings** are saved for the
 project, in its own file, and show only in a GitHub repository: **Show project row** (whether the row shows here,

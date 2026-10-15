@@ -109,6 +109,7 @@ import type { CheckoutFacts, PrFacts, Removal, WorktreeEntry } from '../src/bran
 import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
 import { SETTINGS_PANE, SETTINGS_TITLE, boardProblem, homeRelative, renderSettings, withProject } from '../src/settingspane'
 import type { ProjectChange } from '../src/settingspane'
+import { STATUSLINE_FILE, STATUSLINE_WRITE, projectSlug, statusline } from '../src/statusline'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
 import type { BoardData, Branch, BranchTarget, BranchesShow, BranchesWhere, CiState, GithubRepo, ProjectTool, ToolListener, ToolRun } from '../types'
@@ -524,6 +525,9 @@ async function catchUp($: EngineInterface, key?: ToggleKey): Promise<void> {
   }
   if ((key === undefined || key === 'mascot') && (await isMascotOn($))) {
     await syncMascot($)
+  }
+  if (key === 'statuslineFile') {
+    await writeStatusline($)
   }
 }
 /** Whether a tool's row is hidden: every one under Clean View, the checklist's own under Task View (the band shows it). */
@@ -1161,6 +1165,50 @@ async function measure($: EngineInterface, e: { rateLimits: readonly { kind: str
     await $.store.set('burn', burn)
   }
   await update($, projection, () => project(burn, now))
+}
+
+/** A context window this big is the model's 1M-context form, which the CLI names with a `[1m]` suffix. */
+const ONE_M_WINDOW = 1_000_000
+
+/**
+ * Writes the statusline file, when its option is on, from the figures the bar keeps: sessions writing at once each
+ * land whole, the last one to write winning, its usage limits the account's newest reading.
+ */
+async function writeStatusline($: EngineInterface): Promise<void> {
+  if (!normalizeSettings(await read($, settings)).statuslineFile) {
+    return
+  }
+  const snap = await read($, snapshot)
+  const [sessionId, cwd, projectDir, usage, version, dir, now] = await Promise.all([
+    $.session.id(),
+    $.session.cwd(),
+    $.session.root(),
+    $.session.usage(),
+    $.session.version().then(v => v.version).catch(() => undefined),
+    configDir($),
+    $.clock.now(),
+  ])
+  const context = snap?.context ?? usage.context
+  const model = (await read($, mainModel)) ?? (await $.session.model())
+  const transcript = `${dir}/projects/${projectSlug(projectDir)}/${sessionId}.jsonl`
+  const text = JSON.stringify(
+    statusline({
+      sessionId,
+      transcriptPath: (await $.fs.exists(transcript).catch(() => false)) ? transcript : undefined,
+      cwd,
+      projectDir,
+      model: context.window >= ONE_M_WINDOW && !model.endsWith('[1m]') ? `${model}[1m]` : model,
+      version,
+      durationMs: now - usage.startedAt,
+      costUsd: usage.cost?.usd ?? snap?.threadUsd,
+      context,
+      fiveHour: snap?.fiveHour,
+      weekly: snap?.weekly,
+    }),
+    null,
+    2,
+  )
+  await $.process.run(['sh', '-c', STATUSLINE_WRITE, 'sh', `${dir}/${STATUSLINE_FILE}`], { cwd: dir, stdin: text, timeoutMs: 5_000 }).catch(() => undefined)
 }
 
 /** Git without prompts (a push that needs a password fails rather than waits) or the index refresh `status` writes. */
@@ -2416,6 +2464,7 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     await measure($, e)
+    await writeStatusline($)
 
     return next(e)
   })

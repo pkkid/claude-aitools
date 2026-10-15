@@ -7,6 +7,7 @@ import { ID_WIDTH } from '../src/board'
 import { NOTE_SHRINK } from '../src/format'
 import { BLUE, DOING_TEXT, FAINT_TEXT, GREEN } from '../src/palette'
 import { SETTINGS_PANE } from '../src/settingspane'
+import { STATUSLINE_WRITE } from '../src/statusline'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
@@ -1424,6 +1425,43 @@ describe('wiring', () => {
       await toggleOption($, 'monthlyCost')
       await clock.settle()
       expect(scans).toBeGreaterThan(0)
+    })
+
+    test('the statusline file is written only once its option is on: at once, then after each measure, in one shell', async ($, on) => {
+      const writes: { argv: readonly string[]; stdin?: string }[] = []
+      on('process.run', (_, e) => {
+        if (e.argv[0] === 'sh') writes.push({ argv: e.argv, stdin: e.init?.stdin })
+        return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      })
+      on('session.cwd', () => ({ value: '/p' }))
+      on('session.root', () => ({ value: '/p' }))
+      on('session.model', () => ({ value: 'claude-opus-5-5' }))
+      on('session.version', () => ({ value: { version: '2.1.299' } }))
+      on('fs.exists', () => ({ value: false }))
+      on('session.measure', (_, e) => ({ changed: e.changed }))
+      await start($, on, { usd: 0.5 })
+      const resetsAt = new Date(NOW + 3_600_000).toISOString()
+      const measure = () =>
+        $.session.measure({
+          context: { tokens: 1000, window: 200_000, percent: 1 },
+          rateLimits: [{ kind: 'five_hour', percentUsed: 12, resetsAt }],
+          cost: { usd: 0.5 },
+          changed: ['rateLimits'],
+        })
+      await measure()
+      expect(writes).toEqual([])
+      await toggleOption($, 'statuslineFile')
+      expect(writes).toHaveLength(1)
+      await measure()
+      expect(writes).toHaveLength(2)
+      expect(writes[1]?.argv).toEqual(['sh', '-c', STATUSLINE_WRITE, 'sh', '/home/test/.claude/statusline.json'])
+      const json = JSON.parse(writes[1]?.stdin ?? '{}')
+      expect(writes[1]?.stdin?.startsWith('{\n  "session_id": "session-1",')).toBe(true)
+      expect(json).toMatchObject({ session_id: 'session-1', model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' }, version: '2.1.299' })
+      expect(json.rate_limits).toEqual({ five_hour: { used_percentage: 12, resets_at: Math.floor((NOW + 3_600_000) / 1000) } })
+      await toggleOption($, 'statuslineFile')
+      await measure()
+      expect(writes).toHaveLength(2)
     })
 
     test('no scan while the bar is hidden; showing it scans', async ($, on) => {

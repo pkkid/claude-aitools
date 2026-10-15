@@ -18,6 +18,7 @@ export type ToggleKey =
   | 'burnRate'
   | 'thresholdColors'
   | 'mascot'
+  | 'statuslineFile'
 
 export type Settings = Record<ToggleKey, boolean>
 
