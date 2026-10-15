@@ -105,13 +105,15 @@ function toItem(node: unknown): BoardItem | null {
 }
 
 /**
- * The items as the pane lists them: open ones before done ones, each by its Status column in the board's order
- * (`columns`; one with no Status, or a column the board no longer has, after them), the most recently changed first.
+ * The items as the pane lists them: open ones before done ones, open ones by their Status column against the board's
+ * order (`columns`), furthest along first, so Blocked, In Review, In Progress, then Todo; done ones in the board's order.
+ * One with no Status, or a column the board no longer has, goes after them; then the most recently changed first.
  */
 export function sortItems(items: readonly BoardItem[], columns: readonly string[]): BoardItem[] {
   const column = (item: BoardItem) => {
     const at = item.status === null ? -1 : columns.indexOf(item.status)
-    return at < 0 ? columns.length : at
+    if (at < 0) return columns.length
+    return isDone(item) ? at : columns.length - 1 - at
   }
 
   return [...items].sort(

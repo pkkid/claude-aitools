@@ -61,8 +61,8 @@ describe('board: reading GitHub', () => {
     expect(parsed.data.open).toBe(29)
     const at = (iso: string) => Date.parse(iso)
     expect(parsed.data.items).toEqual([
-      { kind: 'draft', number: null, repo: null, title: 'Someday', url: null, state: null, status: 'Todo', pr: null, updatedAt: at('2026-10-01T10:00:00Z') },
       { kind: 'issue', number: 7, repo: 'pkkid/dalica', title: 'Login', url: 'u7', state: 'OPEN', status: 'In Review', pr: { number: 9, url: 'p9' }, updatedAt: at('2026-10-09T10:00:00Z') },
+      { kind: 'draft', number: null, repo: null, title: 'Someday', url: null, state: null, status: 'Todo', pr: null, updatedAt: at('2026-10-01T10:00:00Z') },
       { kind: 'draft', number: null, repo: null, title: 'Shipped it', url: null, state: null, status: 'Done', pr: null, updatedAt: at('2026-10-10T10:00:00Z') },
       { kind: 'pr', number: 11, repo: 'pkkid/dalica', title: 'Fix', url: 'p11', state: 'MERGED', status: null, pr: { number: 11, url: 'p11' }, updatedAt: at('2026-10-08T10:00:00Z') },
     ])
@@ -74,16 +74,18 @@ describe('board: reading GitHub', () => {
     expect(BOARD_QUERY).not.toContain('orderBy')
   })
 
-  test('items sort open before done, then by Status column in board order, then the most recently changed first', () => {
-    const columns = ['Todo', 'In Progress', 'Done']
+  test('items sort open before done, open ones by Status column against board order, then the most recently changed first', () => {
+    const columns = ['Todo', 'In Progress', 'In Review', 'Blocked', 'Done']
     const items = [
       item({ title: 'old todo', status: 'Todo', updatedAt: 1 }),
       item({ title: 'done', status: 'Done', updatedAt: 9 }),
       item({ title: 'no status', status: null, updatedAt: 8 }),
       item({ title: 'doing', status: 'In Progress', updatedAt: 2 }),
       item({ title: 'new todo', status: 'Todo', updatedAt: 5 }),
+      item({ title: 'review', status: 'In Review', updatedAt: 3 }),
+      item({ title: 'blocked', status: 'Blocked', updatedAt: 4 }),
     ]
-    expect(sortItems(items, columns).map(i => i.title)).toEqual(['new todo', 'old todo', 'doing', 'no status', 'done'])
+    expect(sortItems(items, columns).map(i => i.title)).toEqual(['blocked', 'review', 'doing', 'new todo', 'old todo', 'no status', 'done'])
   })
 
   test("GitHub's errors and a missing board say why", () => {
