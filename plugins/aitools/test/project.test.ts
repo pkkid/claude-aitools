@@ -6,7 +6,6 @@ import {
   isServerUp,
   issueInBranch,
   issueInPrompt,
-  issueLabel,
   parseGithubRemote,
   projectFrom,
   serverStatus,
@@ -143,11 +142,6 @@ describe('tool status', () => {
     expect(commandDot({ phase: 'failed', branch: '', detail: '' })?.color).toBe(RED)
   })
 
-  test("the issue's label: its number, then its title cut to fit", () => {
-    expect(issueLabel({ number: 12, title: null })).toBe('#12')
-    expect(issueLabel({ number: 12, title: 'Login fails' })).toBe('#12 Login fails')
-    expect(issueLabel({ number: 12, title: 'x'.repeat(40) })).toBe(`#12 ${'x'.repeat(31)}…`)
-  })
 })
 
 describe('splitOutput', () => {

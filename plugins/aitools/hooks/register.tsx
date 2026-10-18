@@ -156,7 +156,6 @@ const githubRepo = atom({ plugin: 'aitools', key: 'githubRepo' } as const, null)
 const projectConfig = atom({ plugin: 'aitools', key: 'projectConfig' } as const, null)
 const boardUrl = atom({ plugin: 'aitools', key: 'boardUrl' } as const, null)
 const promptIssue = atom({ plugin: 'aitools', key: 'promptIssue' } as const, null)
-const issueTitle = atom({ plugin: 'aitools', key: 'issueTitle' } as const, null)
 const toolRuns = atom({ plugin: 'aitools', key: 'toolRuns' } as const, {})
 const toolListeners = atom({ plugin: 'aitools', key: 'toolListeners' } as const, {})
 const toolLogs = atom({ plugin: 'aitools', key: 'toolLogs' } as const, {})
@@ -1841,7 +1840,6 @@ async function refreshRepo($: EngineInterface): Promise<void> {
       isProjectLoaded = false
       await loadProject($)
     }
-    await refreshIssueTitle($)
   }
   await readBranchCount($)
 }
@@ -2077,43 +2075,6 @@ async function noteFirstPrompt($: EngineInterface, text: string): Promise<void> 
   hasFirstPrompt = true
   const issue = issueInPrompt(text)
   await update($, promptIssue, () => issue)
-  await refreshIssueTitle($)
-}
-
-/** How many issue titles the store keeps. */
-const TITLES_KEEP = 200
-
-/** The linked issue's title, from the store or GitHub's REST API (one call per issue, kept). */
-async function refreshIssueTitle($: EngineInterface): Promise<void> {
-  const repo = await read($, githubRepo)
-  const issue = await currentIssue($)
-  if (repo === null || issue === null) {
-    return
-  }
-  if ((await read($, issueTitle))?.number === issue) {
-    return
-  }
-  const key = `${repo.owner}/${repo.name}#${issue}`
-  const titles = ((await $.store.get('issueTitles')) as Record<string, string> | undefined) ?? {}
-  let title: string | undefined = titles[key]
-  if (title === undefined) {
-    const result = await $.process
-      .run(['gh', 'api', `repos/${repo.owner}/${repo.name}/issues/${issue}`, '--jq', '.title'], {
-        cwd: repo.main,
-        env: { GH_PROMPT_DISABLED: '1' },
-        timeoutMs: 20_000,
-      })
-      .catch(() => null)
-    title = result?.exitCode === 0 ? result.stdout.trim() : undefined
-    if (title) {
-      const kept = Object.entries(titles).slice(-(TITLES_KEEP - 1))
-      await $.store.set('issueTitles', { ...Object.fromEntries(kept), [key]: title })
-    }
-  }
-  if (title) {
-    const found = title
-    await update($, issueTitle, () => ({ number: issue, title: found }))
-  }
 }
 
 /** Opens a link in the person's default browser: `xdg-open`, else macOS's `open`, else Windows' `start`. */
@@ -2364,7 +2325,6 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
   }
   const config = await read($, projectConfig)
   const issueNumber = (await read($, promptIssue)) ?? issueInBranch(repo.branch)
-  const title = await read($, issueTitle)
 
   return renderProjectRow(
     el,
@@ -2372,7 +2332,7 @@ async function drawProjectRow($: EngineInterface, el: Parameters<typeof renderPr
       repo,
       name: config?.name ?? repo.name,
       boardUrl: await read($, boardUrl),
-      issue: issueNumber === null ? null : { number: issueNumber, title: title?.number === issueNumber ? title.title : null },
+      issue: issueNumber,
       tools: config?.tools ?? [],
       runs: await read($, toolRuns),
       listeners: await read($, toolListeners),
@@ -2458,7 +2418,6 @@ export const register: Register = on => {
     await loadProject($)
     const first = rows.find(row => row.role === 'user' && row.text.trim() && !row.toolResults?.length)
     if (first !== undefined) await noteFirstPrompt($, first.text)
-    await refreshIssueTitle($)
     if (await isMascotOn($)) {
       const isAsked = isQuestionOpenIn(rows)
       await update($, isQuestionOpen, () => isAsked)

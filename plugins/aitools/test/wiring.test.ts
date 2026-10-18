@@ -1993,7 +1993,6 @@ describe('wiring', () => {
         if (cmd === 'git' && args[0] === 'for-each-ref') return ok(w.refs.join('\n'))
         if (cmd === 'gh' && args[1] === 'graphql' && args.includes('login=pkkid')) return ok(JSON.stringify(BOARD_ANSWER))
         if (cmd === 'gh' && args[1] === 'graphql') return ok(JSON.stringify({ data: { repository: { projectsV2: { totalCount: 1, nodes: [{ url: 'https://github.com/users/pkkid/projects/1' }] } } } }))
-        if (cmd === 'gh' && args[1]?.includes('/issues/')) return ok(`Issue ${args[1].split('/').at(-1)} title\n`)
         if (cmd === 'xdg-open') {
           w.opened.push(args[0] ?? '')
           return ok()
@@ -2136,7 +2135,7 @@ describe('wiring', () => {
       const row = await rowText($)
       expect(row['project-name']).toBe('vowelit')
       expect(row['project-board']).toBe('2 project items')
-      expect(row['project-issue']).toBe('#42 Issue 42 title')
+      expect(row['project-issue']).toBe('#42')
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'project-name' })
       await ui.press({ key: 'project-board' })
@@ -2182,9 +2181,9 @@ describe('wiring', () => {
       w.branch = 'feat/77-login'
       on('prompt.submit', (_, e) => ({ text: e.text }))
       await start($, on, { usd: 0 })
-      expect((await rowText($))['project-issue']).toBe('#77 Issue 77 title')
+      expect((await rowText($))['project-issue']).toBe('#77')
       await say($, 'Work on #42')
-      expect((await rowText($))['project-issue']).toBe('#42 Issue 42 title')
+      expect((await rowText($))['project-issue']).toBe('#42')
     })
 
     test("the project's file: its name, no board, and tools on the right", async ($, on) => {

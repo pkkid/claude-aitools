@@ -335,8 +335,6 @@ declare module 'claude-code' {
       boardUrl: string | null
       /** The issue the session's first prompt names; null when it names none (the branch may still name one). */
       promptIssue: number | null
-      /** The title of the issue the row links to, once fetched. */
-      issueTitle: { number: number; title: string } | null
       /** Each tool's run in this session, by tool id. */
       toolRuns: Record<string, ToolRun>
       /** What listens on each server tool's port, by tool id. */

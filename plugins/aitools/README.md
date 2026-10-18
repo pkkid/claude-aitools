@@ -423,8 +423,8 @@ On the left:
 - **`2 bg tasks`**: how many [background tasks](#background-tasks) are running, while any is; it opens their pane.
 - **The issue** the session is about: the first `#123` or `…/issues/123` in the session's first prompt (the context
   Claude Code adds to it is left out), else a number the branch is named for: `feat/123-login`, `123-fix`,
-  `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. Its title comes
-  from GitHub, one call per issue, kept. It opens the issue in your browser.
+  `issue-123`, `gh-123` (a date like `2026-10-10-notes` is not). The prompt wins when both name one. The row shows
+  just its number, `#123`, which opens the issue in your browser.
 
 Outside a GitHub repository there is no row. **Show project row** under the settings pane's Global Settings hides it
 in every project (saved to the settings file), as `/aitools project on|off` does from the prompt; the one under
@@ -485,7 +485,7 @@ Commands and links can name, in braces: `{checkout}` (this session's checkout), 
 `{branch}`, `{repo}` (`owner/name`), `{owner}`, `{name}`, `{issue}` (the row's issue number, or empty) and `{port}`.
 
 Nothing in the file ever runs on its own: a command runs only when you press its button. The mod's own reads (git,
-the port, GitHub's board and issue title) are the only automatic work. A tool the mod can't use is left out, with a
+the port, GitHub's board) are the only automatic work. A tool the mod can't use is left out, with a
 dim line in the chat saying why; the rest of the row still shows.
 
 ## Project pane

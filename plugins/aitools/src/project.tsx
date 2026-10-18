@@ -191,7 +191,8 @@ export type RowView = {
   repo: GithubRepo
   name: string
   boardUrl: string | null
-  issue: { number: number; title: string | null } | null
+  /** The issue the session is about, by number: a button opens it on GitHub. */
+  issue: number | null
   tools: readonly ProjectTool[]
   runs: Readonly<Record<string, ToolRun>>
   listeners: Readonly<Record<string, ToolListener | null>>
@@ -213,15 +214,6 @@ export function itemsLabel(n: number): string {
 /** The branches button's label: `1 branch`, `5 branches`. */
 export function branchesLabel(n: number): string {
   return `${n} ${n === 1 ? 'branch' : 'branches'}`
-}
-
-/** The issue button's label: its number, then its title cut to fit. */
-export function issueLabel(issue: { number: number; title: string | null }): string {
-  const title = issue.title?.trim()
-  if (!title) return `#${issue.number}`
-  const chars = Array.from(title)
-
-  return `#${issue.number} ${chars.length > 32 ? `${chars.slice(0, 31).join('')}…` : title}`
 }
 
 export function renderProjectRow(
@@ -253,12 +245,7 @@ export function renderProjectRow(
         )}
         {view.tasks > 0 && <Button key="project-tasks" label={tasksLabel(view.tasks)} {...QUIET} onPress={() => on.openTasks()} />}
         {view.issue !== null && (
-          <Button
-            key="project-issue"
-            label={issueLabel(view.issue)}
-            {...QUIET}
-            onPress={() => on.open(`${repo.url}/issues/${view.issue?.number}`)}
-          />
+          <Button key="project-issue" label={`#${view.issue}`} {...QUIET} onPress={() => on.open(`${repo.url}/issues/${view.issue}`)} />
         )}
       </Box>
       <Box key="project-tools" flexDirection="row" gap={gap} flexShrink={0} alignItems="center">
