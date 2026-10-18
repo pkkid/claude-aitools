@@ -1513,7 +1513,7 @@ describe('wiring', () => {
      * A repository checked out in /p on main, with three worktrees (done, with changes, with unpushed commits) and a
      * branch only the remote has, merged long ago.
      */
-    type Repo = { calls: string[]; trees: Tree[]; refs: Ref[]; prs: object[] }
+    type Repo = { calls: string[]; trees: Tree[]; refs: Ref[]; prs: object[]; fetching: Promise<void> | null }
 
     /** Answers git and gh as that repository would, recording each command; what is removed leaves it. */
     function fakeRepo(on: On): Repo {
@@ -1533,6 +1533,7 @@ describe('wiring', () => {
           { name: 'old', sha: 'o', ahead: 0, local: false, remote: true },
         ],
         prs: [],
+        fetching: null,
       }
       on('session.cwd', () => ({ value: '/p' }))
       on('tool.call', () => ({ result: 'done' }))
@@ -1543,6 +1544,9 @@ describe('wiring', () => {
         const cwd = e.init?.cwd ?? '/p'
         repo.calls.push(`${cmd} ${args.join(' ')}`)
         const tree = repo.trees.find(t => t.path === cwd)
+        if (args[0] === 'fetch' && repo.fetching !== null) {
+          return repo.fetching.then(() => ok())
+        }
         if (cmd === 'gh') {
           return ok(args[0] === 'pr' ? JSON.stringify(repo.prs) : JSON.stringify(repo.refs.map(r => ({ headSha: r.sha, status: 'completed', conclusion: 'success' }))))
         }
@@ -1577,7 +1581,8 @@ describe('wiring', () => {
           case 'status':
             return ok(tree?.changed ?? '')
           case 'rev-list':
-            return ok(args[1] === '--first-parent' ? 'm\n' : `${tree?.ahead ?? '0'}\n`)
+            // The base's own line, or the commits it lacks: feat/wip's two, grown from main.
+            return ok(args[1] === '--first-parent' ? 'm\n' : 'w w1\nw1 m\n')
           case 'merge-base':
             return ok('m\n')
           case 'diff':
@@ -1618,7 +1623,7 @@ describe('wiring', () => {
       expect(text).toContain('feat/wip · 2 unpushed')
       expect(text).toContain('+10-3')
       const reads = repo.calls.length
-      await clock.advance(10_000)
+      await clock.advance(5 * 60_000)
       expect(repo.calls.length).toBeGreaterThan(reads)
       expect((await run($, 'branches')).text).toBe('Branches closed.')
       const closed = paneCalls().length
@@ -1654,7 +1659,7 @@ describe('wiring', () => {
       expect(prLists()).toBe(4)
     })
 
-    test('a tool that changes files reads the open pane again shortly after', async ($, on) => {
+    test('the open pane reads only every 5 minutes: a tool that changes files waits for the next read', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })
       await run($, 'branches')
@@ -1662,9 +1667,39 @@ describe('wiring', () => {
       const lists = () => repo.calls.filter(c => c === 'git worktree list --porcelain').length
       const before = lists()
       await $.tool.call({ tool: 'Edit', file_path: '/p/a.ts' } as never)
-      await $.tool.call({ tool: 'Edit', file_path: '/p/b.ts' } as never)
-      await clock.advance(1500)
+      await clock.advance(4 * 60_000)
+      expect(lists()).toBe(before)
+      await clock.advance(60_000)
+      expect(lists()).toBeGreaterThan(before)
+    })
+
+    test('the rows show from git before the fetch is in, and are read again once it is', async ($, on) => {
+      const repo = fakeRepo(on)
+      let fetched = () => {}
+      repo.fetching = new Promise(resolve => (fetched = resolve))
+      await start($, on, { usd: 0 })
+      await run($, 'branches')
+      await clock.settle()
+      expect(await paneText($)).toContain('5 branches · 3 worktrees · 2 done')
+      const lists = () => repo.calls.filter(c => c === 'git worktree list --porcelain').length
+      const before = lists()
+      fetched()
+      await clock.settle()
       expect(lists()).toBe(before + 1)
+    })
+
+    test('each read is a few git commands, whatever the number of branches', async ($, on) => {
+      const repo = fakeRepo(on)
+      await start($, on, { usd: 0 })
+      await run($, 'branches')
+      await clock.settle()
+      const git = (args: string) => repo.calls.filter(c => c.startsWith(`git ${args}`)).length
+      expect(git('rev-list --parents')).toBe(2)
+      expect(git('diff-tree')).toBe(1)
+      expect(git('log --no-walk')).toBe(2)
+      // Only the worktree with changes reads its lines in its own folder.
+      expect(git('diff --shortstat')).toBe(2)
+      expect(git('merge-base')).toBe(0)
     })
 
     test('Clean up asks first, then removes only the done branches: worktree, local and remote branch', async ($, on) => {

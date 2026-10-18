@@ -7,16 +7,20 @@ import {
   combineChecks,
   countBranches,
   deleteText,
+  findForks,
   headerText,
   isCleanable,
   isDeletable,
   joinBranches,
   noteParts,
   onText,
+  parseCommitTimes,
+  parseParents,
   parsePrs,
   parseRefs,
   parseRuns,
   parseShortstat,
+  parseTreeStats,
   parseWorktreeList,
   partsText,
   prunerMode,
@@ -129,6 +133,34 @@ describe('branches: reading git', () => {
     expect(parseShortstat(' 3 files changed, 12 insertions(+), 4 deletions(-)')).toEqual({ added: 12, removed: 4 })
     expect(parseShortstat(' 1 file changed, 1 insertion(+)')).toEqual({ added: 1, removed: 0 })
     expect(parseShortstat('')).toEqual({ added: 0, removed: 0 })
+  })
+
+  test('forks: each tip\'s own commits and the one base commit they grew from', () => {
+    // a1 <- a2 on base b1; c1 on b2, then b3 merged in; d is the base's own.
+    const graph = parseParents(['a2 a1', 'a1 b1', 'c2 c1 b3', 'c1 b2', 'o1'].join('\n'))
+    const forks = findForks(graph, ['a2', 'a1', 'c2', 'd', 'o1', ''])
+    expect(forks.get('a2')).toEqual({ ahead: 2, fork: 'b1' })
+    expect(forks.get('a1')).toEqual({ ahead: 1, fork: 'b1' })
+    expect(forks.get('c2')).toEqual({ ahead: 2, fork: null })
+    expect(forks.get('d')).toEqual({ ahead: 0, fork: 'd' })
+    expect(forks.get('o1')).toEqual({ ahead: 1, fork: null })
+    expect(forks.has('')).toBe(false)
+  })
+
+  test('diff-tree stats by commit, a tip with no change left out', () => {
+    const a = 'a'.repeat(40)
+    const b = 'b'.repeat(40)
+    const out = `${a}\n 2 files changed, 7 insertions(+), 3 deletions(-)\n${b}\n 1 file changed, 1 deletion(-)\n`
+    const stats = parseTreeStats(out)
+    expect(stats.get(a)).toEqual({ added: 7, removed: 3 })
+    expect(stats.get(b)).toEqual({ added: 0, removed: 1 })
+    expect(stats.size).toBe(2)
+  })
+
+  test('commit times in milliseconds', () => {
+    const times = parseCommitTimes('abc 1700000000\nbad\n')
+    expect(times.get('abc')).toBe(1_700_000_000_000)
+    expect(times.size).toBe(1)
   })
 })
 

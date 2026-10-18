@@ -1,6 +1,6 @@
 {
   "name": "aitools",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "Subscription usage, API-equivalent cost and context bar above the prompt",
   "author": {
     "name": "Michael Shepanski"

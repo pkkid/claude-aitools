@@ -16,17 +16,15 @@ import type { PrunerMode } from './pruner'
 export const BRANCHES_PANE = 'branches'
 export const BRANCHES_TITLE = 'Branches'
 /**
- * How often the open pane reads git again, and how many of those reads go by between GitHub's (PRs and CI) and a
- * fetch from the remote: every 5 minutes, since GitHub's API budget is shared with everything else signed in as the
- * person. Refresh reads them now.
+ * How often the open pane fetches from the remote and reads git and GitHub (PRs and CI) again: every 5 minutes, since
+ * GitHub's API budget is shared with everything else signed in as the person. Refresh reads them now.
  */
-export const REFRESH_MS = 10_000
-export const GITHUB_EVERY = 30
-/** How long after a tool that can change files the open pane reads git again: a burst of edits reads once. */
+export const REFRESH_MS = 5 * 60_000
+/** How long after a tool that can change files the project row reads the repository again: a burst of edits reads once. */
 export const AFTER_TOOL_MS = 1500
 /** How long the sweeping Clawd shows at least, so a quick clean is still seen. */
 export const SWEEP_MS = 2400
-/** Tools that can change a branch or make a worktree (a subagent can run in its own): the open pane reads git again after one. */
+/** Tools that can change a branch or make a worktree: the project row reads the repository again after one. */
 export const CHANGING_TOOLS: ReadonlySet<string> = new Set(['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Agent', 'EnterWorktree', 'ExitWorktree'])
 /** How far back the base branch's own line is read, to tell a branch never given commits from a merged one. */
 export const FIRST_PARENT_DEPTH = 2000
@@ -145,6 +143,81 @@ export function parseShortstat(stdout: string): { added: number; removed: number
 /** Entries of `git status --porcelain`: changed, staged and untracked files. */
 export function countChanged(stdout: string): number {
   return stdout.split('\n').filter(l => l.trim() !== '').length
+}
+
+/** Each commit's parents, by commit, from `git rev-list --parents`. */
+export function parseParents(stdout: string): Map<string, string[]> {
+  const graph = new Map<string, string[]>()
+  for (const line of stdout.split('\n')) {
+    const [sha, ...parents] = line.trim().split(' ')
+    if (sha) graph.set(sha, parents)
+  }
+
+  return graph
+}
+
+/** Where a commit left the base: how many commits of its own the base lacks, and the base commit it grew from. */
+export type Fork = { ahead: number; fork: string | null }
+
+/**
+ * Where each tip left the base, from the commits the base lacks (`git rev-list --parents ^<base> <tips>`, read once
+ * for every branch): its own commits, and the one base commit they grew from, its merge base. A tip the base has is
+ * its own fork; one that grew from several (the base merged into it) or none (an unrelated history) has null, for
+ * `git merge-base` to settle.
+ */
+export function findForks(graph: ReadonlyMap<string, readonly string[]>, tips: readonly string[]): Map<string, Fork> {
+  const forks = new Map<string, Fork>()
+  for (const tip of new Set(tips.filter(Boolean))) {
+    if (!graph.has(tip)) {
+      forks.set(tip, { ahead: 0, fork: tip })
+      continue
+    }
+    const own = new Set<string>()
+    const edges = new Set<string>()
+    const stack = [tip]
+    for (let sha = stack.pop(); sha !== undefined; sha = stack.pop()) {
+      const parents = graph.get(sha)
+      if (parents === undefined) {
+        // Not among the commits the base lacks: the base has it.
+        edges.add(sha)
+      } else if (!own.has(sha)) {
+        own.add(sha)
+        stack.push(...parents)
+      }
+    }
+    forks.set(tip, { ahead: own.size, fork: edges.size === 1 ? [...edges][0]! : null })
+  }
+
+  return forks
+}
+
+/**
+ * Lines added and removed by each commit, by commit, from `git diff-tree --stdin --shortstat` given `<tip> <fork>`
+ * lines: a commit line, then its stat line. A tip with no changes since its fork writes neither, so is left out.
+ */
+export function parseTreeStats(stdout: string): Map<string, { added: number; removed: number }> {
+  const stats = new Map<string, { added: number; removed: number }>()
+  let sha = ''
+  for (const line of stdout.split('\n').map(l => l.trim())) {
+    if (/^[0-9a-f]{40,64}$/.test(line)) {
+      sha = line
+    } else if (sha && line.includes('changed')) {
+      stats.set(sha, parseShortstat(line))
+    }
+  }
+
+  return stats
+}
+
+/** Each commit's time in milliseconds, by commit, from `git log --format='%H %ct'`. */
+export function parseCommitTimes(stdout: string): Map<string, number> {
+  const times = new Map<string, number>()
+  for (const line of stdout.split('\n')) {
+    const [sha = '', seconds = ''] = line.trim().split(' ')
+    if (sha && seconds && Number.isFinite(Number(seconds))) times.set(sha, Number(seconds) * 1000)
+  }
+
+  return times
 }
 
 // ---- Reading GitHub ----

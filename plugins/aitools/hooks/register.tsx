@@ -86,26 +86,29 @@ import {
   BRANCHES_TITLE,
   CHANGING_TOOLS,
   FIRST_PARENT_DEPTH,
-  GITHUB_EVERY,
   REFRESH_MS,
   SWEEP_MS,
   baseName,
   countBranches,
   countChanged,
+  findForks,
   firstLine,
   isCleanable,
   isDeletable,
   joinBranches,
+  parseCommitTimes,
+  parseParents,
   parsePrs,
   parseRefs,
   parseRuns,
   parseShortstat,
+  parseTreeStats,
   parseWorktreeList,
   refFormat,
   removedText,
   renderBranches,
 } from '../src/branches'
-import type { CheckoutFacts, PrFacts, Removal, WorktreeEntry } from '../src/branches'
+import type { CheckoutFacts, Fork, PrFacts, Removal, WorktreeEntry } from '../src/branches'
 import { DEFAULT_SETTINGS, nextHidden, normalizeSettings } from '../src/settings'
 import { SETTINGS_PANE, SETTINGS_TITLE, boardProblem, homeRelative, renderSettings, withProject } from '../src/settingspane'
 import type { ProjectChange } from '../src/settingspane'
@@ -216,11 +219,10 @@ let notesSaving: Promise<void> = Promise.resolve()
 let latestNotes = ''
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
-/** The Branches pane's timers: its regular read, and the one a changing tool sets. Running only while it is open. */
+/** The Branches pane's regular read, every REFRESH_MS: running only while it is open. */
 let branchTimer: Timer | null = null
-let branchSoon: Timer | null = null
-/** Reads of the pane so far since it opened: every GITHUB_EVERY-th asks GitHub too, and fetches. */
-let branchReads = 0
+/** The fetch and GitHub read under way, if any: one at a time, and the pane reads git again once it is in. */
+let branchNews: Promise<void> | null = null
 /** The read in flight, and whether another (with GitHub's or not) waits for it to finish. */
 let branchReading: Promise<void> | null = null
 let branchQueued: { withGithub: boolean } | null = null
@@ -1214,10 +1216,10 @@ async function writeStatusline($: EngineInterface): Promise<void> {
 /** Git without prompts (a push that needs a password fails rather than waits) or the index refresh `status` writes. */
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
 
-/** Runs git in `cwd`; a git that cannot start reads as a failed run. */
-async function git($: EngineInterface, args: readonly string[], cwd: string, timeoutMs?: number) {
+/** Runs git in `cwd`, with `stdin` given to it; a git that cannot start reads as a failed run. */
+async function git($: EngineInterface, args: readonly string[], cwd: string, timeoutMs?: number, stdin?: string) {
   try {
-    return await $.process.run(['git', ...args], { cwd, env: GIT_ENV, timeoutMs })
+    return await $.process.run(['git', ...args], { cwd, env: GIT_ENV, timeoutMs, stdin })
   } catch (error) {
     return { exitCode: 1, stdout: '', stderr: String(error), isStdoutTruncated: false, isStderrTruncated: false }
   }
@@ -1255,48 +1257,118 @@ function remoteOf(base: string): string {
   return /^([^/]+)\//.exec(base)?.[1] ?? 'origin'
 }
 
-/** What git says of one worktree's folder: its changes, its commits the base lacks, its last commit, its lines. */
-async function readCheckout($: EngineInterface, entry: WorktreeEntry, root: string, base: string): Promise<CheckoutFacts> {
-  if (entry.isMissing) {
-    // No folder to look in: its commits are counted from the main checkout.
-    const ahead = await git($, ['rev-list', '--count', `${base}..${entry.head}`], root)
-    return { changedFiles: 0, aheadOfBase: Number(ahead.stdout.trim() || 0), committedAt: null, added: 0, removed: 0 }
+/**
+ * Where each tip left the base: one read of every commit the base lacks, and `git merge-base` only for a tip that
+ * grew from several base commits (the base merged into it).
+ */
+async function readForks($: EngineInterface, root: string, base: string, tips: readonly string[]): Promise<Map<string, Fork>> {
+  if (tips.length === 0) {
+    return new Map()
   }
-  const [status, ahead, mergeBase, last] = await Promise.all([
-    git($, ['status', '--porcelain'], entry.path),
-    git($, ['rev-list', '--count', `${base}..HEAD`], entry.path),
-    git($, ['merge-base', 'HEAD', base], entry.path),
-    git($, ['log', '-1', '--format=%ct'], entry.path),
-  ])
-  const stat = mergeBase.exitCode === 0 ? await git($, ['diff', '--shortstat', mergeBase.stdout.trim()], entry.path) : null
-
-  return {
-    changedFiles: countChanged(status.stdout),
-    aheadOfBase: Number(ahead.stdout.trim() || 0),
-    committedAt: last.exitCode === 0 && last.stdout.trim() ? Number(last.stdout.trim()) * 1000 : null,
-    ...parseShortstat(stat?.stdout ?? ''),
+  const run = await git($, ['rev-list', '--parents', '--ignore-missing', '--stdin'], root, undefined, `${[...tips, `^${base}`].join('\n')}\n`)
+  if (run.exitCode !== 0) {
+    return new Map()
   }
-}
-
-/** Lines added and removed since the base for each branch commit, read once per commit and kept while the pane is open. */
-async function readStats($: EngineInterface, root: string, base: string, baseSha: string, tips: readonly string[]): Promise<Map<string, { added: number; removed: number }>> {
-  const unread = [...new Set(tips)].filter(sha => sha && !branchStats.has(`${baseSha}:${sha}`))
+  const forks = findForks(parseParents(run.stdout), tips)
   await Promise.all(
-    unread.map(async sha => {
-      const diff = await git($, ['diff', '--shortstat', `${base}...${sha}`], root)
-      if (diff.exitCode === 0) branchStats.set(`${baseSha}:${sha}`, parseShortstat(diff.stdout))
+    [...forks].filter(([, f]) => f.fork === null).map(async ([tip, f]) => {
+      const mergeBase = await git($, ['merge-base', base, tip], root)
+      if (mergeBase.exitCode === 0 && mergeBase.stdout.trim()) forks.set(tip, { ...f, fork: mergeBase.stdout.trim() })
     }),
   )
 
+  return forks
+}
+
+/** Each commit's time, in one read. */
+async function readTimes($: EngineInterface, root: string, shas: readonly string[]): Promise<Map<string, number>> {
+  if (shas.length === 0) {
+    return new Map()
+  }
+  const run = await git($, ['log', '--no-walk=unsorted', '--ignore-missing', '--stdin', '--format=%H %ct'], root, undefined, `${shas.join('\n')}\n`)
+
+  return parseCommitTimes(run.exitCode === 0 ? run.stdout : '')
+}
+
+/**
+ * Lines added and removed since the base for each branch commit: every unread one in a single `git diff-tree`, each
+ * against where it left the base (what `git diff <base>...<tip>` counts), kept while the pane is open.
+ */
+async function readStats(
+  $: EngineInterface,
+  root: string,
+  baseSha: string,
+  tips: readonly string[],
+  forks: ReadonlyMap<string, Fork>,
+): Promise<Map<string, { added: number; removed: number }>> {
+  const key = (sha: string) => `${baseSha}:${sha}`
+  const unread = tips.filter(sha => !branchStats.has(key(sha)) && forks.get(sha)?.fork)
+  // A tip the base has, or that left it and made no change, adds and removes nothing.
+  for (const sha of unread.filter(sha => forks.get(sha)?.fork === sha)) {
+    branchStats.set(key(sha), { added: 0, removed: 0 })
+  }
+  const diffing = unread.filter(sha => forks.get(sha)?.fork !== sha)
+  if (diffing.length > 0) {
+    const lines = diffing.map(sha => `${sha} ${forks.get(sha)?.fork}`).join('\n')
+    const run = await git($, ['diff-tree', '-M', '--stdin', '--shortstat'], root, undefined, `${lines}\n`)
+    if (run.exitCode === 0) {
+      const read = parseTreeStats(run.stdout)
+      for (const sha of diffing) branchStats.set(key(sha), read.get(sha) ?? { added: 0, removed: 0 })
+    }
+  }
+
   return new Map(tips.flatMap(sha => {
-    const stat = branchStats.get(`${baseSha}:${sha}`)
+    const stat = branchStats.get(key(sha))
     return stat === undefined ? [] : [[sha, stat] as const]
   }))
 }
 
 /**
+ * What git says of one worktree's folder: its changes (`status`, read in it), and its commits the base lacks, last
+ * commit and lines from the reads of every branch. A folder with changes reads its lines in it, uncommitted ones
+ * counted; a missing folder has no changes or lines, only its commits.
+ */
+async function readCheckout(
+  $: EngineInterface,
+  entry: WorktreeEntry,
+  status: { exitCode: number; stdout: string } | null,
+  fork: Fork | undefined,
+  committedAt: number | null,
+  committed: { added: number; removed: number } | undefined,
+): Promise<CheckoutFacts> {
+  const aheadOfBase = fork?.ahead ?? 0
+  if (entry.isMissing || status === null) {
+    return { changedFiles: 0, aheadOfBase, committedAt: null, added: 0, removed: 0 }
+  }
+  const changedFiles = status.exitCode === 0 ? countChanged(status.stdout) : 0
+  const diff = changedFiles > 0 && fork?.fork ? await git($, ['diff', '--shortstat', fork.fork], entry.path) : null
+  const lines = diff === null ? (committed ?? { added: 0, removed: 0 }) : parseShortstat(diff.exitCode === 0 ? diff.stdout : '')
+
+  return { changedFiles, aheadOfBase, committedAt, ...lines }
+}
+
+/**
+ * Fetches from the remote (pruning branches it no longer has) and reads GitHub, in the background so the rows show
+ * from what this computer has meanwhile; once both are in, the pane reads git again. One at a time.
+ */
+function readNews($: EngineInterface, root: string, remote: string): void {
+  if (branchNews !== null) {
+    return
+  }
+  branchNews = (async () => {
+    await Promise.all([git($, ['fetch', '--prune', '--quiet', remote], root, 60_000), readGithub($, root)])
+    branchNews = null
+    // Removing branches reads the pane itself once done.
+    if ((await read($, branchAction))?.step !== 'busy') {
+      await refreshBranches($)
+    }
+  })()
+}
+
+/**
  * Reads every branch of the session's repository into the pane, local and remote, with the worktrees they are checked
- * out in; with `withGithub`, fetches from the remote (pruning branches it no longer has) and reads GitHub first.
+ * out in, in a few reads whatever the number of branches. With `withGithub`, also fetches from the remote and reads
+ * GitHub, in the background, reading the pane again once those are in.
  */
 async function readBranches($: EngineInterface, withGithub: boolean): Promise<void> {
   const cwd = await $.session.cwd()
@@ -1316,18 +1388,28 @@ async function readBranches($: EngineInterface, withGithub: boolean): Promise<vo
   const base = branchBase
   const remote = remoteOf(base)
   if (withGithub) {
-    await Promise.all([git($, ['fetch', '--prune', '--quiet', remote], root, 60_000), readGithub($, root)])
+    readNews($, root, remote)
   }
+  // Each worktree's changes, read in its own folder while the branches are read from the main one.
+  const statuses = Promise.all(entries.map(entry => (entry.isMissing ? null : git($, ['status', '--porcelain'], entry.path))))
   const [refsRun, lineRun] = await Promise.all([
     git($, ['for-each-ref', `--format=${refFormat(base)}`, 'refs/heads', `refs/remotes/${remote}`], root),
     git($, ['rev-list', '--first-parent', `--max-count=${FIRST_PARENT_DEPTH}`, base], root),
   ])
   const { locals, remotes } = parseRefs(refsRun.stdout)
   const baseLine = lineRun.stdout.split('\n').filter(Boolean)
-  const [checkouts, stats] = await Promise.all([
-    Promise.all(entries.map(async entry => [entry.path, await readCheckout($, entry, root, base)] as const)).then(pairs => new Map(pairs)),
-    readStats($, root, base, baseLine[0] ?? '', [...[...locals.values()].map(l => l.sha), ...[...remotes.values()].map(r => r.sha)]),
-  ])
+  const heads = [...new Set(entries.map(e => e.head).filter(Boolean))]
+  const tips = [...new Set([...[...locals.values()].map(l => l.sha), ...[...remotes.values()].map(r => r.sha), ...heads].filter(Boolean))]
+  const [forks, times] = await Promise.all([readForks($, root, base, tips), readTimes($, root, heads)])
+  const [stats, statusRuns] = await Promise.all([readStats($, root, baseLine[0] ?? '', tips, forks), statuses])
+  const checkouts = new Map(
+    await Promise.all(
+      entries.map(async (entry, i) => {
+        const facts = await readCheckout($, entry, statusRuns[i] ?? null, forks.get(entry.head), times.get(entry.head) ?? null, stats.get(entry.head))
+        return [entry.path, facts] as const
+      }),
+    ),
+  )
   // Closed while reading: nothing is shown, so nothing is kept.
   if (!(await read($, isBranchesOpen))) {
     return
@@ -1372,37 +1454,36 @@ async function refreshBranches($: EngineInterface, withGithub = false): Promise<
   }
 }
 
-/** The pane's regular read, GitHub's and a fetch every GITHUB_EVERY-th time; none while it removes branches. */
+/** The pane's regular read, every REFRESH_MS: a fetch, git and GitHub; none while it removes branches. */
 async function onBranchTick($: EngineInterface): Promise<void> {
-  branchReads += 1
   if ((await read($, branchAction))?.step !== 'busy') {
-    await refreshBranches($, branchReads % GITHUB_EVERY === 0)
+    await refreshBranches($, true)
   }
 }
 
-/** Runs the pane's reads only while it is open; closed, its timers stop and what it read is dropped. */
+/** Runs the pane's reads only while it is open; closed, its timer stops and what it read is dropped. */
 function syncBranches($: EngineInterface, isOpen: boolean): void {
   if (isOpen) {
     branchTimer ??= $.clock.every(REFRESH_MS, () => void onBranchTick($))
     return
   }
   branchTimer?.cancel()
-  branchSoon?.cancel()
   branchTimer = null
-  branchSoon = null
-  branchReads = 0
   branchBase = null
   branchStats = new Map()
   githubPrs = new Map()
   githubRuns = new Map()
 }
 
-/** The pane's Refresh: a fetch, git and GitHub read now, and the next scheduled GitHub read a full interval later. */
+/** The pane's Refresh: a fetch, git and GitHub read now, and the next regular read a full interval later. */
 async function refreshBranchesNow($: EngineInterface): Promise<void> {
   if ((await read($, branchAction))?.step === 'busy') {
     return
   }
-  branchReads = 0
+  if (branchTimer !== null) {
+    branchTimer.cancel()
+    branchTimer = $.clock.every(REFRESH_MS, () => void onBranchTick($))
+  }
   await refreshBranches($, true)
 }
 
@@ -1424,15 +1505,6 @@ async function setBranchesOpen($: EngineInterface, isOpen: boolean): Promise<voi
 async function openBranches($: EngineInterface): Promise<void> {
   await update($, isToolsOpen, () => false)
   await setBranchesOpen($, true)
-}
-
-/** After a tool that can change files, the open pane reads again shortly: a burst of calls reads once. */
-function branchesSoon($: EngineInterface): void {
-  branchSoon?.cancel()
-  branchSoon = $.clock.after(AFTER_TOOL_MS, () => {
-    branchSoon = null
-    void refreshBranches($)
-  })
 }
 
 /** The pane's Branches pick, saved for later sessions. */
@@ -2912,10 +2984,6 @@ export const register: Register = on => {
         }
       }
     } finally {
-      // While the Branches pane is open, a tool that can change files reads it again shortly after.
-      if (CHANGING_TOOLS.has(e.tool) && (await read($, isBranchesOpen))) {
-        branchesSoon($)
-      }
       // An edit to either aitools.json takes effect at once; a tool that can change the branch reads the repository
       // soon, for the project row's issue and its tools' {branch}.
       if (e.agentId === undefined && isConfigEdit(e as unknown as { tool: string } & Record<string, unknown>)) {
