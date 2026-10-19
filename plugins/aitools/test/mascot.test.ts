@@ -1,14 +1,34 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { MASCOT_START, endsWithQuestion, introMs, isQuestionOpenIn, mascotAlt, mascotDrawing, mascotSvg } from '../src/mascot'
+import { IDLE_MOMENTS, MASCOT_START, ONE_SHOT_MS, TOOL_POSES, endsWithQuestion, introMs, isQuestionOpenIn, isShipCommand, commandPose, mascotAlt, mascotDrawing, mascotSvg } from '../src/mascot'
 import type { MascotPose } from '../types'
 
 const POSES: MascotPose[] = ['idle', 'working', 'reading', 'puzzled', 'sleeping', 'celebrate', 'error', 'wave']
+const MOMENTS: MascotPose[] = [
+  'editing',
+  'command',
+  'searching',
+  'web',
+  'shipping',
+  'thinking',
+  'listening',
+  'stopped',
+  'subagent',
+  'compacting',
+  'waiting',
+  'coffee',
+  'brow',
+  'stretch',
+  'yawn',
+  'hop',
+  'glance',
+  'butterfly',
+]
 
 describe('mascot drawings', () => {
   test('every pose, and every transition between two, is one SVG well under the 131072-character limit', () => {
-    for (const to of POSES) {
-      for (const from of [null, ...POSES]) {
+    for (const to of [...POSES, ...MOMENTS]) {
+      for (const from of [null, ...POSES, ...MOMENTS]) {
         const source = mascotSvg(to, from, 7)
         expect(source).toMatch(/^<svg [^>]*viewBox="3 2 24 10"[^>]*>[\s\S]*<!--7--><\/svg>$/)
         expect(source.length).toBeLessThan(131072)
@@ -36,6 +56,68 @@ describe('mascot drawings', () => {
       'Clawd waving',
     ])
     expect(mascotDrawing(MASCOT_START).alt).toBe('Clawd standing')
+    expect(MOMENTS.map(mascotAlt)).toEqual([
+      'Clawd writing on a page',
+      'Clawd running a command',
+      'Clawd searching with a magnifying glass',
+      'Clawd pointing at a spinning globe',
+      'Clawd launching a rocket',
+      'Clawd thinking',
+      'Clawd catching your prompt',
+      'Clawd stopping short',
+      'Clawd sending off a mini Clawd',
+      'Clawd packing pages into a box',
+      'Clawd waiting on you',
+      'Clawd sipping a coffee',
+      'Clawd wiping his brow',
+      'Clawd stretching',
+      'Clawd yawning',
+      'Clawd hopping',
+      'Clawd glancing at the prompt',
+      'Clawd watching a butterfly',
+    ])
+  })
+
+  test('thinking gives way with an aha: a lightbulb pops in before the next pose', () => {
+    expect(introMs('working', 'thinking')).toBeGreaterThan(introMs('working', 'idle'))
+    expect(mascotSvg('working', 'thinking', 1)).toContain('#F2C14E')
+  })
+
+  test('the moments play once and give way; the idle ones and the long-turn ones all do', () => {
+    for (const pose of ['shipping', 'listening', 'stopped', 'subagent', 'coffee', 'brow', 'yawn', ...IDLE_MOMENTS] as MascotPose[]) {
+      expect(ONE_SHOT_MS[pose]).toBeGreaterThan(0)
+    }
+    for (const pose of ['thinking', 'waiting', 'compacting', ...new Set(Object.values(TOOL_POSES))] as MascotPose[]) {
+      expect(ONE_SHOT_MS[pose]).toBeUndefined()
+    }
+  })
+})
+
+describe('commandPose', () => {
+  test('searching, reading or at the terminal, by the program run first', () => {
+    expect(commandPose('grep -rn mascot src')).toBe('searching')
+    expect(commandPose('cd /p && rg -n "Clawd" | head')).toBe('searching')
+    expect(commandPose('/usr/bin/find . -name "*.ts"')).toBe('searching')
+    expect(commandPose('git grep mascot')).toBe('searching')
+    expect(commandPose('cat a.txt')).toBe('reading')
+    expect(commandPose('npm test | grep fail')).toBe('command')
+    expect(commandPose('git status')).toBe('command')
+  })
+})
+
+describe('isShipCommand', () => {
+  test('a git commit or push, alone or chained, with options before it', () => {
+    expect(isShipCommand('git commit -m "Fix"')).toBe(true)
+    expect(isShipCommand('git add -A && git commit -m "Fix"')).toBe(true)
+    expect(isShipCommand('git -C /repo push origin main')).toBe(true)
+    expect(isShipCommand('cd x; git push')).toBe(true)
+  })
+
+  test('other git commands, or the words elsewhere', () => {
+    expect(isShipCommand('git status')).toBe(false)
+    expect(isShipCommand('git log --grep=commit')).toBe(false)
+    expect(isShipCommand('echo push')).toBe(false)
+    expect(isShipCommand('legit commit')).toBe(false)
   })
 })
 

@@ -3,7 +3,7 @@
 **AI Tools** is a mod for [Claude Code](https://claude.com/claude-code) that adds one slim ribbon above the prompt.
 At a glance it shows how much of your Claude subscription you have used, how full the conversation is, and what the
 work would have cost at API prices. Behind two small buttons it adds a live checklist of Claude's plan, a panel for
-watching background tasks, a panel for cleaning up finished branches and worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
+watching background tasks, a panel for cleaning up finished branches and worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's mascot,
 stands at the start of the bar acting out what Claude is doing.
 
 It works in the **Code tab of the Claude desktop app** and in the **`claude` terminal app**.

@@ -80,8 +80,37 @@ export type AgentCard = {
 /** The background tasks seen this session. */
 export type AgentRun = { startedAt: number; cards: AgentCard[] }
 
-/** What the mascot is doing; Celebrating, Oops and Waving play for a moment and give way. */
-export type MascotPose = 'idle' | 'working' | 'reading' | 'puzzled' | 'sleeping' | 'celebrate' | 'error' | 'wave'
+/**
+ * What the mascot is doing: standing, typing, at a kind of tool's work, at a beat of the turn, or at a small idle
+ * moment. The one-shots (ONE_SHOT_MS) play for a moment and give way.
+ */
+export type MascotPose =
+  | 'idle'
+  | 'working'
+  | 'reading'
+  | 'puzzled'
+  | 'sleeping'
+  | 'celebrate'
+  | 'error'
+  | 'wave'
+  | 'editing'
+  | 'command'
+  | 'searching'
+  | 'web'
+  | 'shipping'
+  | 'thinking'
+  | 'listening'
+  | 'stopped'
+  | 'subagent'
+  | 'compacting'
+  | 'waiting'
+  | 'coffee'
+  | 'brow'
+  | 'stretch'
+  | 'yawn'
+  | 'hop'
+  | 'glance'
+  | 'butterfly'
 
 /**
  * The mascot's pose and what it changed from (its transition plays while `from` is set). `rest` is the pose a moment

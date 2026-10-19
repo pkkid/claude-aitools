@@ -2,23 +2,22 @@
  * The AI Tool Settings pane's picture on surfaces that draw SVG (the desktop Code tab): Clawd in a hard hat, cranking
  * a cog round with a wrench.
  *
- * The pruner's grid (24 x 26 pixels, three text rows tall): Clawd is the bar's mascot moved down DROP rows to stand
- * on the bottom one, the cog up to his right.
+ * The pruner's grid (24 x 26, three text rows tall): Clawd is the bar's rig moved down DROP rows to stand on the
+ * bottom one, the cog up to his right.
  */
 
-import { PANE_PICTURE_HEIGHT, figure, rect, standing } from './mascot'
-import { cycle } from './pruner'
+import { PANE_PICTURE_HEIGHT } from './mascot'
+import { clawd, shade, tf } from './rig'
 
 const LEFT = 3
 const W = 24
 const H = 26
-/** Screen pixels per grid pixel: the grid fills PANE_PICTURE_HEIGHT. */
+/** Screen pixels per grid unit: the grid fills PANE_PICTURE_HEIGHT. */
 const SCALE = PANE_PICTURE_HEIGHT / H
 /** How far Clawd's frame moves down to stand on the bottom row. */
 const DROP = 14
 
 const STEEL = '#9A9893'
-const STEEL_DARK = '#6E6E6A'
 const HOLE = '#3B3B39'
 const GRIP = '#E0524C'
 
@@ -26,55 +25,31 @@ const GRIP = '#E0524C'
 export const FOREMAN_WIDTH = Math.round(W * SCALE)
 export const FOREMAN_HEIGHT = PANE_PICTURE_HEIGHT
 
-const dots = (pts: [number, number][], c: string) => pts.map(([x, y]) => rect(x, y, 1, 1, c)).join('')
-const down = (s: string) => `<g transform="translate(0 ${DROP})">${s}</g>`
-
 /** The cog's middle, up to his right, where the wrench grips its hub. */
-const CX = 20
-const CY = 11
-
-/** The cog's round body, a row at a time from the top: each row's half-width either side of the middle. */
-const BODY = [2, 3, 4, 4, 4, 4, 4, 3, 2]
-
-/** The cog's eight teeth: one on each side, 3 x 2, and one at each corner, 2 x 2, out past the body. */
-const TEETH: [number, number, number, number][] = [
-  [-1, -6, 3, 2], [-1, 5, 3, 2], [-6, -1, 2, 3], [5, -1, 2, 3],
-  [-5, -5, 2, 2], [4, -5, 2, 2], [-5, 4, 2, 2], [4, 4, 2, 2],
-]
+const CX = 20.8
+const CY = 11.5
 
 /** How long the cog takes to turn once. */
 const TURN_MS = 6000
 
-/** The cog, turning round its hub: eight teeth on a round body, a dark hole in the middle. */
+/** The cog, turning round its hub: eight rounded teeth on a round body, a dark hole in the middle. */
 function cog(): string {
-  const body = BODY.map((half, i) => rect(CX - half, CY - 4 + i, half * 2 + 1, 1, STEEL)).join('')
-  const teeth = TEETH.map(([x, y, w, h]) => rect(CX + x, CY + y, w, h, STEEL)).join('')
-  const ring = rect(CX - 2, CY - 2, 5, 5, STEEL_DARK) + rect(CX - 1, CY - 1, 3, 3, HOLE)
-  const hub = `${CX + 0.5} ${CY + 0.5}`
+  const teeth = Array.from({ length: 8 }, (_, i) => `<rect x="-0.9" y="-5.5" width="1.8" height="1.8" rx="0.3" transform="rotate(${i * 45})" fill="${STEEL}"/>`).join('')
+  const turning = tf('rotate', ['0', '360'], TURN_MS, { ease: '0 0 1 1' })
 
-  return `<g><animateTransform attributeName="transform" type="rotate" from="0 ${hub}" to="360 ${hub}" dur="${TURN_MS}ms" repeatCount="indefinite"/>${teeth}${body}${ring}</g>`
+  return `<g transform="translate(${CX} ${CY})"><g>${turning}${teeth}<circle r="4" fill="${STEEL}"/><circle r="1.9" fill="${shade(STEEL, 0.3)}"/><circle r="1.1" fill="${HOLE}"/></g></g>`
 }
 
-/** The wrench from his raised hand up to the hub: a red grip, a steel shaft, its jaw round the hub. */
+/** The wrench from his raised hand up to the hub: a red grip, a steel shaft. */
 const WRENCH =
-  dots([[17, 20], [17, 19]], GRIP) +
-  dots([[18, 18], [18, 17], [19, 16], [19, 15], [19, 14], [20, 13]], STEEL_DARK) +
-  dots([[19, 12], [21, 12]], STEEL_DARK)
+  `<path d="M15.9 19.4L19.6 13.2" stroke="${shade(STEEL, 0.25)}" stroke-width="0.8" stroke-linecap="round"/>` +
+  `<rect x="15.3" y="18.6" width="1.3" height="2.2" rx="0.55" fill="${GRIP}" transform="rotate(35 15.9 19.7)"/>`
 
-/** Cranking: the cog turns while he leans into the wrench a step at a time, blinking now and then. */
+/** Cranking: the cog turns while he leans into the wrench, stepping in place, blinking now and then. */
 function cranking(): string {
-  const at = (step: 'A' | 'B', eyes: 'open' | 'half' = 'open') =>
-    down(figure(standing({ x: -4, arms: 'hold', legs: step, lookY: -1, look: 1, eyes, hat: true })))
+  const leaning = clawd({ x: -3, hat: true, look: 0.5, lookY: -0.4, liftR: 40, walk: 1000, blink: 3000, move: tf('rotate', ['0 12 12', '4 12 12', '0 12 12'], 1000) })
 
-  return cog() + WRENCH + cycle([
-    [at('A'), 500],
-    [at('B'), 500],
-    [at('A'), 500],
-    [at('B'), 500],
-    [at('A'), 500],
-    [at('B', 'half'), 160],
-    [at('B'), 340],
-  ])
+  return cog() + WRENCH + `<g transform="translate(0 ${DROP})">${leaning}</g>`
 }
 
 /** What the picture says, for a reader that cannot see it. */
@@ -84,7 +59,7 @@ let drawn: string | null = null
 
 /** The drawing, built once: the same source keeps the animation playing across redraws. */
 export function foremanSvg(): string {
-  drawn ??= `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LEFT} 0 ${W} ${H}" width="${FOREMAN_WIDTH}" height="${FOREMAN_HEIGHT}" shape-rendering="crispEdges">${cranking()}</svg>`
+  drawn ??= `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LEFT} 0 ${W} ${H}" width="${FOREMAN_WIDTH}" height="${FOREMAN_HEIGHT}">${cranking()}</svg>`
 
   return drawn
 }

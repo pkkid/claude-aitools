@@ -3,28 +3,28 @@
  * Blocks drop in and stack while the board has open items, and he throws his arms up as the last lands; with nothing
  * open he sleeps by the finished tower, all in grey; with no board to read he scratches his head at a fallen block.
  *
- * The pruner's grid (24 x 26 pixels, three text rows tall): Clawd is the bar's mascot moved down DROP rows to stand
- * on the bottom one, the tower to his right.
+ * The pruner's grid (24 x 26, three text rows tall): Clawd is the bar's rig moved down DROP rows to stand on the
+ * bottom one, the tower to his right.
  */
 
-import { O, PANE_PICTURE_HEIGHT, ZZZ, figure, rect, sitting, standing, zzz } from './mascot'
-import { cycle } from './pruner'
+import { PANE_PICTURE_HEIGHT } from './mascot'
+import { ASLEEP, anim, clawd, during, pill, question, shade, swing, tf, zzz } from './rig'
 import type { TowerMode } from '../types'
 
 const LEFT = 3
 const W = 24
 const H = 26
-/** Screen pixels per grid pixel: the grid fills PANE_PICTURE_HEIGHT. */
+/** Screen pixels per grid unit: the grid fills PANE_PICTURE_HEIGHT. */
 const SCALE = PANE_PICTURE_HEIGHT / H
 /** How far Clawd's frame moves down to stand on the bottom row. */
 const DROP = 14
+/** Clawd steps left to make room for the tower. */
+const X = -2
 
 /** The blocks bottom to top: done, done, in progress, to do. */
 const BLOCKS = ['#7FB685', '#7FB685', '#E8B04B', '#9A9893'] as const
-/** Asleep, Clawd, his Zzz and the tower turn these quiet greys, as the pruner's nap does. */
-const ASLEEP = '#5C5C58'
+/** Asleep, the tower turns a grey a little lighter than Clawd's. */
 const ASLEEP_BLOCK = '#6E6E6A'
-const ASLEEP_EDGE = '#4A4A47'
 
 /** One stacking round: the blocks drop in one after another, then all go and it starts again. */
 const ROUND = 4000
@@ -33,56 +33,43 @@ const ROUND = 4000
 export const TOWER_WIDTH = Math.round(W * SCALE)
 export const TOWER_HEIGHT = PANE_PICTURE_HEIGHT
 
-const ms = (n: number) => `${Math.round(n)}ms`
-const dots = (pts: [number, number][], c: string) => pts.map(([x, y]) => rect(x, y, 1, 1, c)).join('')
 const down = (s: string) => `<g transform="translate(0 ${DROP})">${s}</g>`
 
-/** The `i`-th block from the bottom, 6 x 3 with a darker bottom edge. */
-const block = (i: number, c: string, edge = '#00000040') => rect(19, 23 - i * 3, 6, 3, c) + rect(19, 25 - i * 3, 6, 1, edge)
+/** The `i`-th block from the bottom: a rounded 4.4 x 3.1 block with a lighter top edge, standing on the one below. */
+const block = (i: number, c: string, x = 21.5, y = 22.9 - i * 3.4) =>
+  pill(x, y, 4.4, 3.1, c, 0.5) + pill(x + 0.5, y + 0.45, 3.4, 0.35, '#FFFFFF38', 0.17)
 
-/** Blocks dropping onto the stack in turn, each falling the last rows into place; all clear before the next round. */
+/** Blocks dropping onto the stack in turn with a small bounce; all clear before the next round. */
 function building(): string {
   const blocks = BLOCKS.map((c, i) => {
-    const at = i * 0.18
-    const keys = (n: number) => n.toFixed(2)
-    return (
-      `<g opacity="0"><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;${keys(at)};0.92;0.96" calcMode="discrete" dur="${ms(ROUND)}" repeatCount="indefinite"/>` +
-      `<g><animateTransform attributeName="transform" type="translate" values="0 -6;0 -3;0 0;0 0" keyTimes="0;${keys(at + 0.03)};${keys(at + 0.06)};1" calcMode="discrete" dur="${ms(ROUND)}" repeatCount="indefinite"/>${block(i, c)}</g></g>`
-    )
+    const at = 0.02 + i * 0.18
+    const fade = anim('opacity', [0, 0, 1, 1, 0], ROUND, { times: [0, at, at + 0.03, 0.93, 1] })
+    const drop = tf('translate', ['0 -8', '0 -8', '0 0.3', '0 0', '0 0'], ROUND, { times: [0, at, at + 0.07, at + 0.1, 1] })
+    return `<g opacity="0">${fade}<g>${drop}${block(i, c)}</g></g>`
   }).join('')
-  const clawd = cycle([
-    [down(figure(standing({ x: -5, look: 1, lookY: -1 }))), 1400],
-    [down(figure(standing({ x: -5, look: 1, lookY: -1, eyes: 'half' }))), 140],
-    [down(figure(standing({ x: -5, look: 1, lookY: -1 }))), ROUND - 1400 - 140 - 1100],
-    [down(figure(standing({ x: -5, arms: 'up', eyes: 'happy' }))), 1100],
-  ])
+  // He watches each block land, then cheers as the last settles.
+  const cheer = 1 - 1100 / ROUND
+  const watching = clawd({ x: X, look: 0.5, lookY: -0.4, blink: 2600, breathe: [0.97, 2000] })
+  const cheering = clawd({ x: X, eyes: 'happy', liftL: 60, liftR: 60, move: tf('translate', ['0 0', '0 -1.2', '0 0'], 500) })
 
-  return blocks + clawd
+  return blocks + during(down(watching), 0, cheer, ROUND) + during(down(cheering), cheer, 1, ROUND)
 }
 
 /** Asleep by the finished tower, he and it in grey. */
 function resting(): string {
-  const tower = BLOCKS.map((_, i) => block(i, ASLEEP_BLOCK, ASLEEP_EDGE)).join('')
-  const asleep = (figure(sitting({ x: -4 })) + `<g transform="translate(-5 0)">${zzz(0)}</g>`).replaceAll(O, ASLEEP).replaceAll(ZZZ, ASLEEP)
+  const tower = BLOCKS.map((_, i) => block(i, i % 2 ? ASLEEP_BLOCK : shade(ASLEEP_BLOCK, 0.08))).join('')
+  const asleep = clawd({ x: X, color: ASLEEP, sit: true, y: 2, eyes: 'closed', liftL: -55, liftR: -55, breathe: [0.9, 4200] })
 
-  return tower + down(asleep)
+  return tower + down(asleep + zzz(X + 19.5, 6.5, ASLEEP))
 }
 
-const QUESTION: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 1], [1, 2], [1, 4]]
-
-/** The tower fallen: one block left standing, one on its side, and Clawd looking at them with a question mark. */
+/** The tower fallen: one block left standing, one on its side, and Clawd scratching his head with a question mark. */
 function puzzled(): string {
-  const fallen = block(0, BLOCKS[0]) + rect(22, 17, 3, 6, BLOCKS[2]) + rect(24, 17, 1, 6, '#00000040')
-  const mark = `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 1" calcMode="discrete" dur="1s" repeatCount="indefinite"/>${dots(
-    QUESTION.map(([x, y]) => [14 + x, 11 + y]),
-    O,
-  )}</g>`
-  const clawd = cycle([
-    [down(figure(standing({ x: -5, look: 1 }))), 2600],
-    [down(figure(standing({ x: -5, look: 1, eyes: 'half' }))), 140],
-  ])
+  // The fallen block lies on its side, its lighter top edge turned to face him.
+  const fallen = block(0, BLOCKS[0]) + pill(17.6, 21.6, 3.1, 4.4, BLOCKS[2], 0.5) + pill(18.05, 22.1, 0.35, 3.4, '#FFFFFF38', 0.17)
+  const scratching = clawd({ x: X, look: 0.5, blink: 2800, liftR: 115, armFront: true, armR: swing('R', 14, 400) })
 
-  return fallen + mark + clawd
+  return fallen + question(18.5, 13) + down(scratching)
 }
 
 const DRAW: Record<TowerMode, () => string> = { building, resting, puzzled }
@@ -104,7 +91,7 @@ const drawn = new Map<TowerMode, string>()
 export function towerSvg(mode: TowerMode): string {
   let source = drawn.get(mode)
   if (source === undefined) {
-    source = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LEFT} 0 ${W} ${H}" width="${TOWER_WIDTH}" height="${TOWER_HEIGHT}" shape-rendering="crispEdges">${DRAW[mode]()}</svg>`
+    source = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LEFT} 0 ${W} ${H}" width="${TOWER_WIDTH}" height="${TOWER_HEIGHT}">${DRAW[mode]()}</svg>`
     drawn.set(mode, source)
   }
 

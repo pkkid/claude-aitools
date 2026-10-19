@@ -71,13 +71,19 @@ import {
   pingDelay,
 } from '../src/keepwarm'
 import {
+  IDLE_MOMENTS,
+  IDLE_MOMENT_MS,
+  LONG_TURN_MOMENT_MS,
+  LONG_TURN_MS,
   MASCOT_START,
   ONE_SHOT_MS,
-  READ_TOOLS,
   SLEEP_AFTER_MS,
+  TOOL_POSES,
+  commandPose,
   endsWithQuestion,
   introMs,
   isQuestionOpenIn,
+  isShipCommand,
   mascotDrawing,
 } from '../src/mascot'
 import {
@@ -200,10 +206,18 @@ const trackedAgents = new Set<string>()
 /** The last workflow the main chat started, and how many of its agents have a line: what workflow agents are called. */
 let lastWorkflow: string | null = null
 let workflowAgents = 0
-/** Read-only tool calls of the main chat in flight: the mascot reads until the last one returns. */
-let readsInFlight = 0
+/** The poses of the main chat's tool calls in flight (TOOL_POSES), oldest first: the mascot shows the latest. */
+let toolPoses: MascotPose[] = []
 /** Whether a main-chat turn is running: where the mascot stands when he is turned on mid-session. */
 let isTurnRunning = false
+/** When the running turn started, and when it last played a long turn's moment. */
+let turnStartedAt = 0
+let longMomentAt = 0
+/** When the mascot last played an idle moment, and how many he has played: they come in turn. */
+let idleMomentAt = 0
+let idleMoments = 0
+/** Whether the next turn answers the person's own prompt: it starts with the mascot catching it. */
+let isPromptPending = false
 /** Whether Claude has opened the question pop-up since the person's last prompt: then the bar offers no ? button. */
 let isAskedThisRequest = false
 /** /keepwarm's one pending timer: its next ping, or its end when no ping is due before then. */
@@ -798,11 +812,15 @@ async function startSubagent(
   }
 }
 
+/** Standing idle and the small moments he plays there: time spent across them counts toward falling asleep. */
+const isIdling = (pose: MascotPose) => pose === 'idle' || pose === 'yawn' || IDLE_MOMENTS.includes(pose)
+
 /**
  * Shows `pose`, playing its transition from the pose before first; `rest` is the pose a moment pose (ONE_SHOT_MS)
- * gives way to. Showing the pose already up only changes what it gives way to.
+ * gives way to. Showing the pose already up only changes what it gives way to. `isSoft` lets a moment playing finish
+ * first: `pose` then becomes what it gives way to.
  */
-async function showMascot($: EngineInterface, pose: MascotPose, rest: MascotPose = pose): Promise<void> {
+async function showMascot($: EngineInterface, pose: MascotPose, rest: MascotPose = pose, isSoft = false): Promise<void> {
   if (!(await isMascotOn($))) {
     return
   }
@@ -810,18 +828,23 @@ async function showMascot($: EngineInterface, pose: MascotPose, rest: MascotPose
   // Checked inside the update, so two calls at once (parallel tool calls) change the pose once.
   let isChanged = false
   const shown = await update($, mascot, m => {
+    if (isSoft && m.pose !== pose && ONE_SHOT_MS[m.pose] !== undefined) {
+      return { ...m, rest: pose }
+    }
     isChanged = m.pose !== pose
-    return isChanged ? { pose, rest, from: m.pose, change: m.change + 1, seq: m.seq + 1, since: now } : { ...m, rest }
+    const since = isIdling(pose) && isIdling(m.pose) ? m.since : now
+    return isChanged ? { pose, rest, from: m.pose, change: m.change + 1, seq: m.seq + 1, since } : { ...m, rest }
   })
   if (!isChanged) {
     return
   }
   const { change } = shown
   // Once the intro has played the source drops it, so a redraw can only ever restart the loop.
-  $.clock.after(introMs(pose, shown.from), () => void settleMascot($, change))
+  const intro = introMs(pose, shown.from)
+  $.clock.after(intro, () => void settleMascot($, change))
   const hold = ONE_SHOT_MS[pose]
   if (hold !== undefined) {
-    $.clock.after(hold, () => void endMoment($, change))
+    $.clock.after(intro + hold, () => void endMoment($, change))
   }
 }
 
@@ -838,9 +861,20 @@ async function endMoment($: EngineInterface, change: number): Promise<void> {
   }
 }
 
-/** The pose underneath when no turn runs: puzzled while a question waits on the person, standing otherwise. */
+/**
+ * The pose underneath when no turn runs: waiting while a question dialog is open, puzzled while an answer's question
+ * waits on the person, standing otherwise.
+ */
 async function restingPose($: EngineInterface): Promise<MascotPose> {
-  return (await read($, asking)) > 0 || (await read($, isQuestionOpen)) ? 'puzzled' : 'idle'
+  if ((await read($, asking)) > 0) {
+    return 'waiting'
+  }
+  return (await read($, isQuestionOpen)) ? 'puzzled' : 'idle'
+}
+
+/** The pose underneath right now: typing through a turn, else at rest. */
+async function underneath($: EngineInterface): Promise<MascotPose> {
+  return isTurnRunning ? 'working' : await restingPose($)
 }
 
 /**
@@ -850,7 +884,36 @@ async function restingPose($: EngineInterface): Promise<MascotPose> {
 async function syncMascot($: EngineInterface): Promise<void> {
   const isAsked = isQuestionOpenIn(await $.session.messages().catch(() => []))
   await update($, isQuestionOpen, () => isAsked)
-  await showMascot($, isTurnRunning ? 'working' : await restingPose($))
+  await showMascot($, await underneath($))
+}
+
+/**
+ * Passes the main chat's response through, the mascot following it: thinking while it streams thinking, typing again
+ * once it writes or calls a tool. Only a change of kind moves him, and a moment playing finishes first.
+ */
+async function* followStream<C extends { kind: string }, R>($: EngineInterface, stream: AsyncGenerator<C, R>): AsyncGenerator<C, R> {
+  let kind = ''
+  try {
+    for (;;) {
+      const piece = await stream.next()
+      if (piece.done) {
+        return piece.value
+      }
+      if (piece.value.kind !== kind && piece.value.kind !== 'engine') {
+        kind = piece.value.kind
+        if (kind === 'thinking' && toolPoses.length === 0 && (await read($, asking)) === 0) {
+          await showMascot($, 'thinking', 'working', true)
+        } else if (kind !== 'thinking' && (await read($, mascot)).pose === 'thinking') {
+          await showMascot($, 'working', 'working', true)
+        } else if (kind !== 'thinking' && (await read($, mascot)).rest === 'thinking') {
+          await update($, mascot, (m): MascotState => ({ ...m, rest: 'working' }))
+        }
+      }
+      yield piece.value
+    }
+  } finally {
+    await stream.return(undefined as R)
+  }
 }
 
 /** Standing idle long enough, the mascot sits down and falls asleep; the person's next prompt wakes him. */
@@ -858,6 +921,29 @@ async function checkSleep($: EngineInterface): Promise<void> {
   const shown = await read($, mascot)
   if (shown.pose === 'idle' && (await $.clock.now()) - shown.since >= SLEEP_AFTER_MS && (await isMascotOn($))) {
     await showMascot($, 'sleeping')
+  }
+}
+
+/**
+ * Now and then a moment: standing idle, the next idle moment in turn (a yawn in his last minute awake); typing
+ * through a long turn, a sip of coffee, or past three times as long a wipe of his brow.
+ */
+async function checkMoment($: EngineInterface): Promise<void> {
+  const shown = await read($, mascot)
+  const now = await $.clock.now()
+  if (shown.pose === 'idle') {
+    const idleFor = now - shown.since
+    if (idleFor >= IDLE_MOMENT_MS && now - idleMomentAt >= IDLE_MOMENT_MS && (await isMascotOn($))) {
+      idleMomentAt = now
+      const moment = idleFor >= SLEEP_AFTER_MS - IDLE_MOMENT_MS ? 'yawn' : IDLE_MOMENTS[idleMoments++ % IDLE_MOMENTS.length]!
+      await showMascot($, moment, 'idle')
+    }
+  } else if (shown.pose === 'working' && isTurnRunning) {
+    const runFor = now - turnStartedAt
+    if (runFor >= LONG_TURN_MS && now - longMomentAt >= LONG_TURN_MOMENT_MS && (await isMascotOn($))) {
+      longMomentAt = now
+      await showMascot($, runFor >= LONG_TURN_MS * 3 ? 'brow' : 'coffee', 'working')
+    }
   }
 }
 
@@ -930,6 +1016,7 @@ async function onTick($: EngineInterface): Promise<void> {
     await update($, tick, n => (n ?? 0) + 1)
   }
   await checkSleep($)
+  await checkMoment($)
   // The config files may have been edited by hand, and the branch changed in a terminal.
   await reloadConfigs($)
   await refreshRepo($)
@@ -2479,8 +2566,14 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     isTurnRunning = true
+    turnStartedAt = await $.clock.now()
+    longMomentAt = turnStartedAt
+    toolPoses = []
+    // He catches the person's own prompt, then types; a turn of anything else starts him typing.
+    const isPrompt = isPromptPending
+    isPromptPending = false
     if ((await read($, asking)) === 0) {
-      await showMascot($, 'working')
+      await showMascot($, isPrompt ? 'listening' : 'working', 'working')
     }
     // The cost when the turn started: the last-turn cost's baseline, only while it is shown.
     if (await isShown($, 'lastTurnCost')) {
@@ -2510,7 +2603,10 @@ export const register: Register = on => {
       await update($, cacheAt, () => at)
       // Persisting is a nicety (survives reloads); it must never hold up the model request.
       await rememberCacheAt($, at).catch(() => undefined)
-      return yield* next(e)
+      if (!(await isMascotOn($))) {
+        return yield* next(e)
+      }
+      return yield* followStream($, next(e))
     }
     // A subagent: its first request can come before its start is recorded, so an unknown one waits briefly for the
     // starts still in flight, then gets a line if it still has none.
@@ -2547,11 +2643,14 @@ export const register: Register = on => {
       await update($, finals, list => addFinal(list, e.answer))
     }
     if (await isMascotOn($)) {
-      // A finished answer is celebrated, unless it asks something; a turn that failed or was interrupted startles him.
+      // A finished answer is celebrated, unless it asks something; an interrupted turn stops him short, and one that
+      // failed startles him.
       const isAsked = e.reason === 'answer' && endsWithQuestion(e.answer)
       await update($, isQuestionOpen, () => isAsked)
+      toolPoses = []
       const rest = await restingPose($)
-      await showMascot($, e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate', rest)
+      const ending = e.reason === 'aborted' ? 'stopped' : e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate'
+      await showMascot($, ending, rest)
     }
     const baseline = await read($, turnBaseline)
     const base = baseline?.turnId === e.turnId ? baseline.usd : undefined
@@ -2608,8 +2707,21 @@ export const register: Register = on => {
   // Compaction replaces the conversation the cache held: its warmth is unknown until the next request, and keepwarm
   // waits for that, as cache-tax does.
   on('session.compact', async ($, e, next) => {
-    const result = await next(e)
-    if (e.agentId === undefined) {
+    // The mascot packs the conversation into a box while it compacts (not while a compaction is worked out ahead).
+    const isMain = e.agentId === undefined
+    const isPacking = isMain && e.trigger !== 'precompute'
+    if (isPacking) {
+      await showMascot($, 'compacting', await underneath($))
+    }
+    let result: Awaited<ReturnType<typeof next>>
+    try {
+      result = await next(e)
+    } finally {
+      if (isPacking && (await read($, mascot)).pose === 'compacting') {
+        await showMascot($, await underneath($))
+      }
+    }
+    if (isMain) {
       await update($, cacheAt, () => null)
       await armKeepWarm($)
     }
@@ -2666,13 +2778,23 @@ export const register: Register = on => {
       await update($, isAskable, () => false)
       isAskedThisRequest = false
     }
+    isPromptPending = PERSON_ORIGINS.has(e.origin.kind)
     const view = viewNote({ isTaskView: await read($, isTaskView), isCleanView: await read($, isCleanView) })
 
     return view === null ? next(e) : next({ ...e, context: [...(e.context ?? []), view] })
   })
 
   // Every subagent gets a line, following its tool calls and, while the pane is open, the progress it reports.
-  on('agent.spawn', ($, e, next) => (e.fork ? next(e) : startSubagent($, e, next)))
+  on('agent.spawn', async ($, e, next) => {
+    if (e.fork) {
+      return next(e)
+    }
+    // The main chat sending one off: a mini Clawd pops out of the mascot and runs.
+    if (e.parentAgentId === undefined) {
+      await showMascot($, 'subagent', await underneath($))
+    }
+    return startSubagent($, e, next)
+  })
 
   // A task's notice delivered into a running turn, the main chat's or a subagent's, comes as an attachment rather
   // than a prompt: a notice that a task ended finishes its line.
@@ -2894,8 +3016,9 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The mascot follows the main chat's tools: reading while a read-only tool runs, puzzled while an AskUserQuestion
-  // dialog waits (its `next` resolves once answered), startled when a call fails or is refused.
+  // The mascot follows the main chat's tools: at each kind of tool's work while one runs (TOOL_POSES), waiting while an
+  // AskUserQuestion dialog is open (its `next` resolves once answered), startled when a call fails or is refused, and
+  // launching a rocket when a git commit or push succeeds.
   //
   // A subagent with a line in the Background tasks pane shows its latest tool call there: `Reading bar.tsx`,
   // `Running npm test`.
@@ -2914,7 +3037,7 @@ export const register: Register = on => {
       }
       if (e.tool === 'AskUserQuestion') {
         await update($, asking, n => n + 1)
-        await showMascot($, 'puzzled', 'working')
+        await showMascot($, 'waiting', 'working')
         try {
           return await next(e)
         } finally {
@@ -2922,10 +3045,11 @@ export const register: Register = on => {
           await showMascot($, 'working')
         }
       }
-      const isReading = READ_TOOLS.has(e.tool)
-      if (isReading) {
-        readsInFlight += 1
-        await showMascot($, 'reading', 'working')
+      const command = (e as unknown as { command?: unknown }).command
+      const posed = e.tool === 'Bash' && typeof command === 'string' ? commandPose(command) : TOOL_POSES[e.tool]
+      if (posed !== undefined) {
+        toolPoses.push(posed)
+        await showMascot($, posed, 'working')
       }
       let isFailed = true
       try {
@@ -2933,13 +3057,16 @@ export const register: Register = on => {
         isFailed = result.deny !== undefined || result.isError === true
         return result
       } finally {
-        if (isReading) {
-          readsInFlight = Math.max(0, readsInFlight - 1)
+        if (posed !== undefined) {
+          toolPoses.splice(toolPoses.lastIndexOf(posed), 1)
         }
+        const after = toolPoses.at(-1) ?? 'working'
         if (isFailed) {
-          await showMascot($, 'error', readsInFlight > 0 ? 'reading' : 'working')
-        } else if (isReading && readsInFlight === 0) {
-          await showMascot($, 'working')
+          await showMascot($, 'error', after)
+        } else if (e.tool === 'Bash' && typeof command === 'string' && isShipCommand(command)) {
+          await showMascot($, 'shipping', after)
+        } else if (posed !== undefined) {
+          await showMascot($, after)
         }
       }
     } finally {

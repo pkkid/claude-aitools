@@ -120,20 +120,32 @@ are always written here; a project's own `.claude/aitools.json` gets only what y
 
 ## Mascot
 
-In the desktop Code tab, Clawd, Claude Code's pixel mascot, stands at the start of the bar (48 × 20 px) and acts out
-what Claude is doing. Every pose is animated, and a change of pose plays a short transition first: he walks over to his
-laptop or paper, sits down to sleep, jolts awake.
+In the desktop Code tab, Clawd, Claude Code's mascot, stands at the start of the bar (48 × 20 px) and acts out what
+Claude is doing. He is drawn in flat shapes with eased motion, and a change of pose plays a short transition first: he
+walks over to his laptop or terminal, sits down to sleep, jolts awake, or throws an arm up as a thought lands.
 
 | Pose | When |
 |---|---|
 | Waving | A new session starts (a few seconds) |
-| Standing | Nothing is running: breathing, blinking, glancing around |
-| Typing | A turn is running: tapping at a laptop beside him, code typing out on its screen |
-| Reading | A read-only tool runs (Read, Grep, Glob, a web fetch or search): reading a sheet of paper |
-| Puzzled | A question waits on you: an open AskUserQuestion dialog, or a reply that ends with a question mark. Your next prompt settles it |
+| Catching | You send a prompt: it flies up from the prompt box and he catches it (a few seconds) |
+| Thinking | The reply streams thinking: dots pulse in a thought bubble, then a lightbulb as he acts |
+| Typing | A turn is running and no tool below is: tapping at a laptop, code typing out on its screen |
+| Reading | Read, or a shell command that reads a file (`cat`, `head`, `tail`): reading a sheet of paper |
+| Writing | Edit or Write: lines writing themselves onto a page as a pencil follows |
+| Searching | A shell command that searches (`grep`, `rg`, `find`): sweeping a magnifying glass over files |
+| Terminal | Any other shell command: typing at a little terminal, Enter, output scrolling in |
+| Globe | A web search or fetch: pointing at a spinning globe |
+| Rocket | A `git commit` or `git push` succeeds: a rocket lifts off and he cheers (a few seconds) |
+| Mini Clawd | The chat sends off a subagent: a mini Clawd pops out of him and runs off (a few seconds) |
+| Packing | The conversation compacts: a messy stack of pages squashed into a box |
+| Coffee | A turn running past 3 minutes: a sip now and then; past 9 minutes he wipes his brow instead |
+| Waiting | An AskUserQuestion dialog is open: tapping a foot, a cursor blinking in his bubble |
+| Puzzled | A reply ends with a question mark. Your next prompt settles it |
 | Celebrating | A turn finishes with an answer (a few seconds, then Standing) |
-| Oops | A tool call fails or is refused, or a turn is interrupted or fails (a few seconds) |
-| Sleeping | Standing idle for 5 minutes; your next prompt wakes him |
+| Stopping | You interrupt a turn: he skids to a halt, hands up (a few seconds) |
+| Oops | A tool call fails or is refused, or a turn fails (a few seconds) |
+| Standing | Nothing is running: breathing, blinking, glancing around. Once a minute a small moment: a glance at the prompt, a stretch, a hop, a butterfly |
+| Sleeping | Standing idle for 5 minutes, with a yawn in the last one; your next prompt wakes him |
 
 He is SVG, so he never shows in the terminal, and **Mascot** in the settings pane (on by default) is offered on the
 desktop only.

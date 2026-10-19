@@ -95,6 +95,9 @@ function mockPanes(on: On): Panes {
   return panes
 }
 
+/** What each model request streams back beneath the plugin, in order: none unless a test sets it. */
+let streamed: { kind: 'thinking' | 'text'; index: number; text: string }[] = []
+
 /**
  * Starts a session whose `$.session.usage()` reports `cost.usd` as `costs.usd` and whose history is `messages`;
  * `steps` collects each model request's agent, model and effort as the bottom sends it. Returns its panes.
@@ -109,6 +112,7 @@ async function start(
 ) {
   mock.store(on, { lastSnapshot: PREVIOUS, ...stored })
   clock = mock.clock(on, { now: NOW })
+  streamed = []
   coreBand(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -132,6 +136,7 @@ async function start(
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('turn.step', async function* (_, e) {
     steps.push({ agentId: e.agentId, model: e.model, effort: e.effort })
+    for (const piece of streamed) yield piece
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
   })
   await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
@@ -1174,6 +1179,14 @@ describe('wiring', () => {
       await $.turn.start({ text, turnId: 't1' })
     }
 
+    /** The person's prompt, and the moment he catches it played out: he is typing. */
+    async function prompted($: Engine, text: string) {
+      await prompt($, text)
+      expect(await pose($)).toBe('Clawd catching your prompt')
+      await clock.advance(4500)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    }
+
     test('a new session starts him waving, then standing', async ($, on) => {
       await begin($, on)
       expect(await pose($)).toBe('Clawd waving')
@@ -1188,7 +1201,7 @@ describe('wiring', () => {
       expect(await pose($)).toBe('Clawd standing')
     })
 
-    test('reading lasts until the last of several read-only calls returns', async ($, on) => {
+    test("a tool's pose lasts until it returns; the one still running shows after", async ($, on) => {
       let release = () => {}
       const slow = new Promise<void>(resolve => (release = resolve))
       on('tool.call', { tool: 'WebFetch' }, async () => {
@@ -1196,28 +1209,163 @@ describe('wiring', () => {
         return { result: 'page text' }
       })
       await begin($, on)
-      await prompt($, 'Look things up')
+      await prompted($, 'Look things up')
       const pending = $.tool.call({ tool: 'WebFetch', url: 'https://example.com', prompt: 'x' } as never)
       await clock.settle()
+      expect(await pose($)).toBe('Clawd pointing at a spinning globe')
       await $.tool.call({ tool: 'Read', file_path: '/a' } as never)
-      expect(await pose($)).toBe('Clawd reading a sheet of paper')
+      // The read is done; the fetch still runs.
+      expect(await pose($)).toBe('Clawd pointing at a spinning globe')
       release()
       await pending
       expect(await pose($)).toBe('Clawd typing on a laptop')
     })
 
-    test('a prompt sets him typing; a read-only tool has him reading, then typing again', async ($, on) => {
-      let during: unknown
-      on('tool.call', { tool: 'WebFetch' }, async () => {
-        during = await pose($)
-        return { result: 'page text' }
+    test('a prompt is caught, then he types; each kind of tool has its own pose, then typing again', async ($, on) => {
+      const during: Record<string, unknown> = {}
+      const noting = (tool: string) => async () => {
+        during[tool] = await pose($)
+        return { result: 'ok' }
+      }
+      on('tool.call', { tool: 'Read' }, noting('Read'))
+      on('tool.call', { tool: 'WebFetch' }, noting('WebFetch'))
+      on('tool.call', { tool: 'WebSearch' }, noting('WebSearch'))
+      on('tool.call', { tool: 'Edit' }, noting('Edit'))
+      on('tool.call', { tool: 'Write' }, noting('Write'))
+      on('tool.call', { tool: 'Bash' }, async (_, e) => {
+        during[String((e as unknown as { command: string }).command)] = await pose($)
+        return { result: 'ok' }
       })
       await begin($, on)
-      await prompt($, 'Fix the bug')
+      await prompted($, 'Fix the bug')
+      const calls = [
+        { tool: 'Read' },
+        { tool: 'WebFetch' },
+        { tool: 'WebSearch' },
+        { tool: 'Edit' },
+        { tool: 'Write' },
+        { tool: 'Bash', command: 'npm test' },
+        { tool: 'Bash', command: 'cd src && rg -n mascot' },
+        { tool: 'Bash', command: 'cat bar.tsx | head' },
+      ]
+      for (const call of calls) {
+        await $.tool.call(call as never)
+        expect(await pose($)).toBe('Clawd typing on a laptop')
+      }
+      expect(during).toEqual({
+        Read: 'Clawd reading a sheet of paper',
+        WebFetch: 'Clawd pointing at a spinning globe',
+        WebSearch: 'Clawd pointing at a spinning globe',
+        Edit: 'Clawd writing on a page',
+        Write: 'Clawd writing on a page',
+        'npm test': 'Clawd running a command',
+        'cd src && rg -n mascot': 'Clawd searching with a magnifying glass',
+        'cat bar.tsx | head': 'Clawd reading a sheet of paper',
+      })
+    })
+
+    test('a prompt that comes from a background task starts him typing, with nothing to catch', async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } } as never)
+      await $.turn.start({ text: 'done', turnId: 't1' })
       expect(await pose($)).toBe('Clawd typing on a laptop')
-      await $.tool.call({ tool: 'WebFetch', url: 'https://example.com', prompt: 'x' } as never)
-      expect(during).toBe('Clawd reading a sheet of paper')
+    })
+
+    test('a git commit or push that succeeds launches a rocket, then he types again', async ($, on) => {
+      on('tool.call', { tool: 'Bash' }, () => ({ result: 'ok' }))
+      await begin($, on)
+      await prompted($, 'Ship it')
+      await $.tool.call({ tool: 'Bash', command: 'git add -A && git commit -m "Fix"' } as never)
+      expect(await pose($)).toBe('Clawd launching a rocket')
+      await clock.advance(4500)
       expect(await pose($)).toBe('Clawd typing on a laptop')
+      await $.tool.call({ tool: 'Bash', command: 'git status' } as never)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('thinking while the reply streams thinking, typing once it writes', async ($, on) => {
+      await begin($, on)
+      await prompted($, 'Think hard')
+      streamed = [
+        { kind: 'thinking', index: 0, text: 'Hmm' },
+        { kind: 'thinking', index: 0, text: ' more' },
+        { kind: 'text', index: 1, text: 'Done.' },
+      ]
+      const seen: unknown[] = []
+      for await (const piece of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) {
+        seen.push([(piece as { kind: string }).kind, await pose($)])
+      }
+      expect(seen).toEqual([
+        ['thinking', 'Clawd thinking'],
+        ['thinking', 'Clawd thinking'],
+        ['text', 'Clawd typing on a laptop'],
+      ])
+    })
+
+    test('the main chat sending off a subagent has a mini Clawd pop out of him', async ($, on) => {
+      on('agent.spawn', () => ({ model: 'parent', agentId: 'agent-1' }))
+      await begin($, on)
+      await prompted($, 'Fan out')
+      await $.agent.spawn({
+        tool_use_id: 'call-1',
+        prompt: 'look',
+        description: 'Survey',
+        subagentType: 'general-purpose',
+        provider: { plugin: 'engine', tier: 'core' },
+        parentModel: 'claude-opus-5-5',
+        background: true,
+        fork: false,
+      })
+      expect(await pose($)).toBe('Clawd sending off a mini Clawd')
+      await clock.advance(4500)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('compacting the conversation has him pack it into a box until it is done', async ($, on) => {
+      let during: unknown
+      on('session.compact', async () => {
+        during = await pose($)
+        return { skip: 'test' } as never
+      })
+      await begin($, on)
+      await clock.advance(3000)
+      await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Hello', toolUses: [] }] } as never)
+      expect(during).toBe('Clawd packing pages into a box')
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('a long turn has him sip a coffee now and then, and much later wipe his brow', async ($, on) => {
+      await begin($, on)
+      await prompted($, 'Big job')
+      // Checked every 30 seconds: three minutes in, then every minute and a half.
+      await clock.advance(2 * 60_000)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+      await clock.advance(58_000)
+      expect(await pose($)).toBe('Clawd sipping a coffee')
+      await clock.advance(6000)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+      // Nine minutes in, he wipes his brow instead.
+      await clock.advance(9 * 60_000 + 1500 - 187_500)
+      expect(await pose($)).toBe('Clawd wiping his brow')
+    })
+
+    test('standing idle he plays small moments in turn, and yawns in his last minute awake', async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      const seen: unknown[] = []
+      for (let i = 0; i < 170; i++) {
+        await clock.advance(2000)
+        const now = await pose($)
+        if (seen.at(-1) !== now) seen.push(now)
+      }
+      expect(seen.filter(p => p !== 'Clawd standing')).toEqual([
+        'Clawd glancing at the prompt',
+        'Clawd stretching',
+        'Clawd hopping',
+        'Clawd yawning',
+        'Clawd asleep',
+      ])
     })
 
     test('a failed tool startles him for a moment, then he types again', async ($, on) => {
@@ -1225,7 +1373,7 @@ describe('wiring', () => {
       await $.turn.start({ text: 'go', turnId: 't1' })
       await $.tool.call({ tool: 'Bash', command: 'false' } as never)
       expect(await pose($)).toBe('Clawd startled')
-      await clock.advance(3000)
+      await clock.advance(4000)
       expect(await pose($)).toBe('Clawd typing on a laptop')
     })
 
@@ -1234,7 +1382,7 @@ describe('wiring', () => {
       await $.turn.start({ text: 'go', turnId: 't1' })
       await $.turn.complete({ ...complete('t1'), answer: 'Fixed it.' })
       expect(await pose($)).toBe('Clawd celebrating')
-      await clock.advance(3000)
+      await clock.advance(4000)
       expect(await pose($)).toBe('Clawd standing')
     })
 
@@ -1244,19 +1392,18 @@ describe('wiring', () => {
       expect(await pose($)).toBe('Clawd looking puzzled')
       await clock.advance(10 * 60_000)
       expect(await pose($)).toBe('Clawd looking puzzled')
-      await prompt($, 'bar.tsx')
-      expect(await pose($)).toBe('Clawd typing on a laptop')
+      await prompted($, 'bar.tsx')
     })
 
-    test('an interrupted turn startles him, then he stands', async ($, on) => {
+    test('an interrupted turn stops him short, then he stands', async ($, on) => {
       await begin($, on)
       await $.turn.complete({ ...complete('t1'), reason: 'aborted', isAborted: true })
-      expect(await pose($)).toBe('Clawd startled')
-      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd stopping short')
+      await clock.advance(4000)
       expect(await pose($)).toBe('Clawd standing')
     })
 
-    test('puzzled while an AskUserQuestion dialog is open, typing once it is answered', async ($, on) => {
+    test('waiting on the person while an AskUserQuestion dialog is open, typing once it is answered', async ($, on) => {
       let during: unknown
       on('tool.call', { tool: 'AskUserQuestion' }, async () => {
         during = await pose($)
@@ -1264,7 +1411,7 @@ describe('wiring', () => {
       })
       await begin($, on)
       await $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never)
-      expect(during).toBe('Clawd looking puzzled')
+      expect(during).toBe('Clawd waiting on you')
       expect(await pose($)).toBe('Clawd typing on a laptop')
     })
 
@@ -1272,12 +1419,11 @@ describe('wiring', () => {
       await begin($, on)
       await clock.advance(3000)
       await clock.advance(4 * 60_000)
-      expect(await pose($)).toBe('Clawd standing')
+      expect(await pose($)).not.toBe('Clawd asleep')
       // Checked every 30 seconds, so asleep within half a minute past five.
       await clock.advance(90_000)
       expect(await pose($)).toBe('Clawd asleep')
-      await prompt($, 'Wake up')
-      expect(await pose($)).toBe('Clawd typing on a laptop')
+      await prompted($, 'Wake up')
     })
 
     test('a change of pose plays its transition, then the source drops it', async ($, on) => {
