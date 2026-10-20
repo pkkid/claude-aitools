@@ -22,6 +22,7 @@ export const TOGGLES: readonly {
   isOffByDefault?: true
 }[] = [
   { key: 'mascot', group: 'look', label: 'Show mascot', hint: 'Clawd, acting out what Claude is doing', needsSvg: true },
+  { key: 'reactions', group: 'look', label: 'Clawd reactions', hint: 'He reacts to what you say: blushing at praise, mad at swearing', needsSvg: true },
   { key: 'label', group: 'look', label: 'Show title', hint: 'AI Tools at the start of the bar' },
   { key: 'thresholdColors', group: 'look', label: 'Threshold colors', hint: 'Yellow from 70%, red from 90%; a cache about to go cold' },
   { key: 'projectRow', group: 'look', label: 'Show project row', hint: 'A second row: repo, board, issue and tools, in every project' },

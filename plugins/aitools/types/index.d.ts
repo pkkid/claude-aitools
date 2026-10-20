@@ -18,6 +18,7 @@ export type ToggleKey =
   | 'burnRate'
   | 'thresholdColors'
   | 'mascot'
+  | 'reactions'
   | 'statuslineFile'
 
 export type Settings = Record<ToggleKey, boolean>
@@ -111,6 +112,17 @@ export type MascotPose =
   | 'hop'
   | 'glance'
   | 'butterfly'
+  | 'blush'
+  | 'mad'
+  | 'callMe'
+  | 'roll'
+  | 'bow'
+  | 'laugh'
+  | 'highFive'
+  | 'sheepish'
+  | 'dance'
+  | 'pat'
+  | 'hammock'
 
 /**
  * The mascot's pose and what it changed from (its transition plays while `from` is set). `rest` is the pose a moment

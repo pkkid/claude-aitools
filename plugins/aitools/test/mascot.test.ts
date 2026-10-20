@@ -24,11 +24,12 @@ const MOMENTS: MascotPose[] = [
   'glance',
   'butterfly',
 ]
+const REACTIONS: MascotPose[] = ['blush', 'mad', 'callMe', 'roll', 'bow', 'laugh', 'highFive', 'sheepish', 'dance', 'pat', 'hammock']
 
 describe('mascot drawings', () => {
   test('every pose, and every transition between two, is one SVG well under the 131072-character limit', () => {
-    for (const to of [...POSES, ...MOMENTS]) {
-      for (const from of [null, ...POSES, ...MOMENTS]) {
+    for (const to of [...POSES, ...MOMENTS, ...REACTIONS]) {
+      for (const from of [null, ...POSES, ...MOMENTS, ...REACTIONS]) {
         const source = mascotSvg(to, from, 7)
         expect(source).toMatch(/^<svg [^>]*viewBox="3 2 24 10"[^>]*>[\s\S]*<!--7--><\/svg>$/)
         expect(source.length).toBeLessThan(131072)
@@ -75,6 +76,19 @@ describe('mascot drawings', () => {
       'Clawd hopping',
       'Clawd glancing at the prompt',
       'Clawd watching a butterfly',
+    ])
+    expect(REACTIONS.map(mascotAlt)).toEqual([
+      'Clawd blushing',
+      'Clawd getting mad',
+      'Clawd saying call me',
+      'Clawd doing a barrel roll',
+      'Clawd taking a bow',
+      'Clawd laughing',
+      'Clawd giving a high five',
+      'Clawd looking sheepish',
+      'Clawd dancing',
+      'Clawd getting a head pat',
+      'Clawd napping in a hammock',
     ])
   })
 

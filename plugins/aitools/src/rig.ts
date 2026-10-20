@@ -99,7 +99,7 @@ export function during(content: string, from: number, to: number, dur: number): 
 
 // ---- the rig ----
 
-export type Eyes = 'open' | 'half' | 'closed' | 'squint' | 'happy' | 'wide'
+export type Eyes = 'open' | 'half' | 'closed' | 'squint' | 'happy' | 'wide' | 'wink' | 'angry'
 
 /**
  * Clawd in one drawing. Static: where he stands (x steps aside, y down), his colour, sitting or walking (ms a stride
@@ -168,6 +168,13 @@ function eyeShape(kind: Eyes, isLeft: boolean): string {
       return `<circle r="1.05" fill="${INK}"/><circle cx="0.3" cy="-0.3" r="0.32" fill="#fff"/>`
     case 'squint':
       return isLeft ? open : line('M-0.8 0.3L0.8 -0.1', 0.48)
+    case 'wink':
+      return isLeft ? open : line('M-0.85 0.55Q0 -0.75 0.85 0.55', 0.48)
+    case 'angry': {
+      // Lids cut on a slant toward the middle, a brow pressed down over each.
+      const s = isLeft ? 1 : -1
+      return `<path d="M${-0.5 * s} -0.6L${0.5 * s} -0.05V0.5A0.5 0.5 0 0 ${isLeft ? 1 : 0} ${-0.5 * s} 0.5z" fill="${INK}"/>` + line(`M${-0.85 * s} -1.35L${0.75 * s} -0.7`, 0.4)
+    }
   }
 }
 

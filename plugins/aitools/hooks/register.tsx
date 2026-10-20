@@ -86,6 +86,8 @@ import {
   isShipCommand,
   mascotDrawing,
 } from '../src/mascot'
+import { mayReact, reactionTo } from '../src/reactions'
+import type { Reaction } from '../src/reactions'
 import {
   AFTER_TOOL_MS,
   BRANCHES_PANE,
@@ -218,6 +220,12 @@ let idleMomentAt = 0
 let idleMoments = 0
 /** Whether the next turn answers the person's own prompt: it starts with the mascot catching it. */
 let isPromptPending = false
+/** The reaction the person's prompt drew (reactions.ts), played as the turn it starts begins. */
+let pendingReaction: Reaction | null = null
+/** Where the mascot settles when the running turn ends, if its prompt's reaction says: the hammock, or asleep. */
+let settleAfter: MascotPose | null = null
+/** When each reaction last played, by name: one said in passing waits out a cooldown. */
+const reactedAt = new Map<string, number>()
 /** Whether Claude has opened the question pop-up since the person's last prompt: then the bar offers no ? button. */
 let isAskedThisRequest = false
 /** /keepwarm's one pending timer: its next ping, or its end when no ping is due before then. */
@@ -2572,8 +2580,15 @@ export const register: Register = on => {
     // He catches the person's own prompt, then types; a turn of anything else starts him typing.
     const isPrompt = isPromptPending
     isPromptPending = false
+    // He catches the prompt, or reacts to what it says to him.
+    const reaction = isPrompt ? pendingReaction : null
+    pendingReaction = null
+    settleAfter = reaction?.after ?? null
+    if (reaction !== null) {
+      reactedAt.set(reaction.name, turnStartedAt)
+    }
     if ((await read($, asking)) === 0) {
-      await showMascot($, isPrompt ? 'listening' : 'working', 'working')
+      await showMascot($, reaction?.pose ?? (isPrompt ? 'listening' : 'working'), 'working')
     }
     // The cost when the turn started: the last-turn cost's baseline, only while it is shown.
     if (await isShown($, 'lastTurnCost')) {
@@ -2632,6 +2647,8 @@ export const register: Register = on => {
       return next(e)
     }
     isTurnRunning = false
+    const settle = settleAfter
+    settleAfter = null
     if (e.usage?.model && (await read($, mainModel)) !== e.usage.model) {
       const model = e.usage.model
       await update($, mainModel, () => model)
@@ -2649,7 +2666,7 @@ export const register: Register = on => {
       await update($, isQuestionOpen, () => isAsked)
       toolPoses = []
       const rest = await restingPose($)
-      const ending = e.reason === 'aborted' ? 'stopped' : e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate'
+      const ending = e.reason === 'aborted' ? 'stopped' : e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : (settle ?? 'celebrate')
       await showMascot($, ending, rest)
     }
     const baseline = await read($, turnBaseline)
@@ -2779,6 +2796,10 @@ export const register: Register = on => {
       isAskedThisRequest = false
     }
     isPromptPending = PERSON_ORIGINS.has(e.origin.kind)
+    pendingReaction = isPromptPending && (await isShown($, 'reactions')) ? reactionTo(e.text) : null
+    if (pendingReaction !== null && !mayReact(pendingReaction, reactedAt.get(pendingReaction.name), await $.clock.now())) {
+      pendingReaction = null
+    }
     const view = viewNote({ isTaskView: await read($, isTaskView), isCleanView: await read($, isCleanView) })
 
     return view === null ? next(e) : next({ ...e, context: [...(e.context ?? []), view] })

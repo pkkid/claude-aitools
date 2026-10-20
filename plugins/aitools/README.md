@@ -41,6 +41,7 @@ in two sections:
 ```
 Global Settings  May be overridden by project settings
 ● Show mascot       Clawd, acting out what Claude is doing
+● Clawd reactions   He reacts to what you say: blushing at praise, mad at swearing
 ● Show title        AI Tools at the start of the bar
 ● Threshold colors  Yellow from 70%, red from 90%; a cache about to go cold
 ● Show project row  A second row: repo, board, issue and tools, in every project
@@ -65,7 +66,7 @@ Project Settings  Saved for vowelit only
   Tools             Server · Test · Docs. Edit project.tools in the file.
 ```
 
-**Global Settings** holds the bar's display options. First the bar's own: show mascot (offered on the
+**Global Settings** holds the bar's display options. First the bar's own: show mascot and Clawd reactions (offered on the
 desktop only), show title, threshold colors, show project row (in every project) and statusline file. Then each meter in the bar is one row, its options beside its name and
 a sample of it after them, all under **Meters** in the order the bar shows them: 5-hour, weekly, context, tokens, cache,
 thread cost, month and burn rate. A meter shows while any of its options is on. The **🛠** button always
@@ -149,6 +150,32 @@ walks over to his laptop or terminal, sits down to sleep, jolts awake, or throws
 
 He is SVG, so he never shows in the terminal, and **Mascot** in the settings pane (on by default) is offered on the
 desktop only.
+
+### Reactions
+
+Say something to him and he reacts in place of catching your prompt, then types as usual. The mod reads your prompt
+against a list of phrases (no model, no tokens): a long prompt only at its first and last 12 words, skipping code,
+quotes, pasted text and links; slash commands never.
+
+| You say | He |
+|---|---|
+| A compliment: "good job", "you're the best", "Perfect!" | Blushes, a heart floating up |
+| "love you", "<3", "call me" | Winks with a phone to his head, hearts floating off it |
+| Scolding, swearing, or a prompt in all capitals | Turns red and stomps, steam and an anger mark |
+| "take a break", "go take a nap" | Yawns; once the turn ends, naps in a hammock until your next prompt |
+| "good night", "calling it a day" | Waves; once the turn ends, falls asleep |
+| "do a barrel roll", "do a flip" | Leaps and spins |
+| "high five", "we did it" | Snaps a claw up to meet your hand |
+| "\*pats Clawd\*", "good boy" | Squishes under a head pat, then hearts |
+| "thanks" | Takes a bow |
+| "lol", "haha" | Laughs, tears of joy flying |
+| "are you sure?", "that's wrong", "oops" | Scratches his head sheepishly |
+| "dance", "yay", "🎉" | Dances, music notes floating up |
+| "hi", "good morning", "bye" | Waves |
+| "ship it", "lgtm" | Launches the rocket |
+
+A reaction said in passing (thanks, hello, a compliment) plays at most once every 5 minutes; one asked for outright
+(a barrel roll, a break, a dance) plays every time. **Clawd reactions** in the settings pane turns them off.
 
 ## Handoff
 

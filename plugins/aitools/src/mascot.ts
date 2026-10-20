@@ -15,6 +15,7 @@ import { O, anim, clawd, during, ms, pill, question, swing, tf, zzz } from './ri
 import type { Rig } from './rig'
 import { MOMENTS, aha } from './moments'
 import type { Pose } from './moments'
+import { REACTIONS } from './reactions'
 
 /** The part of the grid shown. */
 const LEFT = 3
@@ -194,7 +195,7 @@ const POSES: Pose[] = [
   },
 ]
 
-const POSE = Object.fromEntries([...POSES, ...MOMENTS].map(p => [p.id, p])) as Record<MascotPose, Pose>
+const POSE = Object.fromEntries([...POSES, ...MOMENTS, ...REACTIONS].map(p => [p.id, p])) as Record<MascotPose, Pose>
 
 // ---- assembling a pose, with or without a transition into it ----
 
@@ -207,7 +208,7 @@ type Shot = { rig: Rig; dur: number; path?: string[]; props?: string }
 /** The steps played between two poses before the target's own loop starts. */
 function introShots(from: Pose, to: Pose): Shot[] {
   const shots: Shot[] = []
-  if (from.id === 'sleeping') {
+  if (from.id === 'sleeping' || from.id === 'hammock') {
     // Jolts awake and hops up.
     shots.push(
       { rig: from.rest, dur: 150 },
@@ -228,7 +229,7 @@ function introShots(from: Pose, to: Pose): Shot[] {
     const dir = Math.sign(toX - fromX)
     shots.push({ rig: { x: toX, look: dir * 0.5, walk: 300 }, dur: Math.abs(toX - fromX) * 130, path: [`${fromX - toX} 0`, '0 0'] })
   }
-  if (to.id === 'sleeping') {
+  if (to.id === 'sleeping' || to.id === 'hammock') {
     // Eyes droop and close, then he sits down.
     shots.push({ rig: { eyes: 'half' }, dur: 450 }, { rig: { eyes: 'closed' }, dur: 450 }, { rig: to.rest, dur: 250, path: ['0 -2', '0 0'] })
   } else {
@@ -326,7 +327,7 @@ export const ONE_SHOT_MS: Partial<Record<MascotPose, number>> = {
   celebrate: 2600,
   error: 2400,
   wave: 2600,
-  ...Object.fromEntries(MOMENTS.filter(p => p.cycle !== undefined).map(p => [p.id, p.cycle])),
+  ...Object.fromEntries([...MOMENTS, ...REACTIONS].filter(p => p.cycle !== undefined).map(p => [p.id, p.cycle])),
 }
 
 /** The small moments he plays now and then standing idle, in turn; the yawn comes in his last minute before sleep. */
